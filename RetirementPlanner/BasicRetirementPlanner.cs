@@ -1,5 +1,4 @@
 using RetirementPlanner.IRS;
-using static RetirementPlanner.TaxBrackets;
 
 namespace RetirementPlanner;
 
@@ -19,16 +18,6 @@ public class RetirementPlanner
         _ => 0  // Fully retired
     };
 
-
-    public static double GetSocialSecurityYearly(Person person, int age)
-    {
-        if (age >= person.SocialSecurityClaimingAge)
-            return person.SocialSecurityIncome;
-
-        return 0; // No Social Security before claiming age
-    }
-
-
     public static void AdjustContributionsYearly(Person person, int age, double salary)
     {
         if (age < person.PartTimeAge)
@@ -46,12 +35,6 @@ public class RetirementPlanner
             double yearlyRothIRAContribution = ContributionLimits.CalculateRothIRAContributionYearly(salary);
             person.GetAccount(AccountType.RothIRA).Deposit(yearlyRothIRAContribution);
         }
-    }
-
-    public static double WithdrawWithTaxes(FileType fileType, double amount)
-    {
-        double taxOwed = TaxBrackets.CalculateTaxes(fileType, amount);
-        return amount - taxOwed; // Net withdrawal after taxes
     }
 
     public static double ProcessRMDWithdrawal(Person person)
@@ -78,7 +61,10 @@ public class RetirementPlanner
 
     public static double ApplyYearlyTaxes(Person person)
     {
-        double totalTaxableIncome = 0;
+        double totalTaxableIncome = person.RothConversionsThisYear;
+        person.RothConversionsThisYear = 0;
+
+        totalTaxableIncome += GetTaxableSocialSecurity(person, person.IncomeYearly);
 
         // Sum taxable withdrawals from all tax-deferred accounts
         foreach (var account in person.Accounts)
@@ -101,26 +87,57 @@ public class RetirementPlanner
         return taxesOwed;
     }
 
+    private static void PerformRothConversion(Person person)
+    {
+        double conversionLimit = TaxBrackets.GetOptimalRothConversionAmount(person);
+
+        if (conversionLimit <= 0) return; // No conversion if already in high tax bracket
+
+        var traditionalAccounts = person.Accounts.Where(a => a.Type == AccountType.Traditional401k || a.Type == AccountType.TraditionalIRA);
+        var rothAccount = person.GetAccount(AccountType.RothIRA);
+
+        if (rothAccount == null) return; // No Roth IRA available
+
+        foreach (var account in traditionalAccounts)
+        {
+            double conversionAmount = Math.Min(account.Balance, conversionLimit);
+            account.Withdraw(conversionAmount);
+            rothAccount.Deposit(conversionAmount);
+            person.RothConversionsThisYear += conversionAmount;
+            conversionLimit -= conversionAmount;
+        }
+    }
+
+    public static double GetTaxableSocialSecurity(Person person, double totalIncome)
+    {
+        double provisionalIncome = totalIncome + (person.SocialSecurityIncome * 0.5);
+
+        if (provisionalIncome <= 25000) return 0; // No SS taxation (single)
+        if (provisionalIncome <= 34000) return person.SocialSecurityIncome * 0.50; // 50% taxable
+        return person.SocialSecurityIncome * 0.85; // 85% taxable
+    }
+
 
     public static void RunRetirementSimulation(Person person, TimeSpan timeStep)
     {
-        DateTime startDate = new DateTime(DateTime.Now.Year, 1, 1);
-        DateTime endDate = new DateTime(person.BirthDate.Year + 100, 1, 1);
+        DateTime startDate = new(DateTime.Now.Year, 1, 1);
+        DateTime endDate = new(person.BirthDate.Year + 100, 1, 1);
         DateTime currentDate = startDate;
 
-        List<FinancialSnapshot> history = [];
+        List<FinancialSnapshot> history = new();
         double adjustedSalary = person.CurrentSalary;
         double yearlyTaxesOwed = 0;
 
         while (currentDate < endDate)
         {
             int age = currentDate.Year - person.BirthDate.Year;
-            var isRetired = age >= person.FullRetirementAge;
+            bool isRetired = age >= person.FullRetirementAge;
 
-            // Apply salary increases ONLY on January 1st
+            // Apply salary increases and adjust contributions on January 1st
             if (currentDate.Month == 1 && currentDate.Day == 1)
             {
                 adjustedSalary *= (1 + person.SalaryGrowthRate);
+                AdjustContributionsYearly(person, age, adjustedSalary);
             }
 
             SimulateMonth(person, adjustedSalary, age, out double socialSecurityIncome, out double totalExpenses, out double totalIncome, out double totalWithdrawn);
@@ -155,18 +172,27 @@ public class RetirementPlanner
         Helpers.ExportToCSV(history, "retirement_simulation.csv");
     }
 
+
     private static void SimulateMonth(Person person, double adjustedSalary, int age, out double socialSecurityIncome, out double totalExpenses, out double totalIncome, out double totalWithdrawn)
     {
         // Social Security income
-        socialSecurityIncome = GetSocialSecurityYearly(person, age) / 12;
+        socialSecurityIncome = socialSecurityIncome = (age >= person.SocialSecurityClaimingAge)
+        ? SocialSecurity.CalculateSocialSecurityBenefit(person.BirthDate.Year, person.SocialSecurityClaimingAge, person.CurrentSalary) / 12
+        : 0;
 
         // Total monthly expenses
-        totalExpenses = (person.EssentialExpenses + person.DiscretionarySpending);
+        totalExpenses = person.EssentialExpenses + person.DiscretionarySpending;
 
         // Total monthly income
         totalIncome = (adjustedSalary / 12) + socialSecurityIncome;
         double withdrawalNeeded = Math.Max(0, totalExpenses - totalIncome);
         totalWithdrawn = 0;
+
+        // Perform Roth conversion before RMDs
+        if (age >= 59.5)
+        {
+            PerformRothConversion(person);
+        }
 
         // Apply RMDs first at age 73+
         if (age >= 73)
@@ -182,21 +208,40 @@ public class RetirementPlanner
         {
             TryWithdraw(person, accountType, ref totalIncome, ref withdrawalNeeded);
         }
+
+        foreach (var account in person.Accounts)
+        {
+            account.ApplyMonthlyGrowth();
+        }
     }
 
     private static void TryWithdraw(Person person, AccountType accountType, ref double totalIncome, ref double withdrawalNeeded)
     {
         if (withdrawalNeeded <= 0) return;
 
-        var accounts = person.Accounts.Where(w => w.Type == accountType && w.Balance > 0);
+        var accounts = person.Accounts.Where(acc => acc.Type == accountType && acc.Balance > 0);
         foreach (var account in accounts)
         {
-            double amountWithdrawn = account.Withdraw(withdrawalNeeded);
+            double amountWithdrawn = 0;
+
+            // If under 59.5 and using Traditional 401(k)/IRA, use SEPP
+            if (accountType == AccountType.Traditional401k || accountType == AccountType.TraditionalIRA)
+            {
+                amountWithdrawn = person.CurrentAge < 59.5 ? CalculateSEPP(person) / 12 : account.Withdraw(withdrawalNeeded);
+            }
+            else
+            {
+                amountWithdrawn = account.Withdraw(withdrawalNeeded);
+            }
+
             withdrawalNeeded -= amountWithdrawn;
             totalIncome += amountWithdrawn;
 
             if (withdrawalNeeded <= 0) break;
         }
     }
+
+
+
 
 }

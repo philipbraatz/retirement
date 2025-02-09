@@ -31,12 +31,15 @@ public class Person
     public double EssentialExpenses { get; set; }  // Must be paid (rent, food, healthcare)
     public double DiscretionarySpending { get; set; }  // Wants (travel, hobbies)
 
-    public List<InvestmentAccount> Accounts { get; set; } = new List<InvestmentAccount>();
+    public List<InvestmentAccount> Accounts { get; set; } = [];
 
     public InvestmentAccount? GetAccount(AccountType type)
     {
         return Accounts.FirstOrDefault(acc => acc.Type == type);
     }
+
+    public double RothConversionsThisYear { get; set; } = 0;
+
 
     // Social Security
     public int SocialSecurityClaimingAge { get; set; }
