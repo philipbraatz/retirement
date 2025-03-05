@@ -3,5 +3,5 @@
 ################################################################################
 
 /.vs
-/RetirementPlanner/obj
-/RetirementPlanner/bin/Debug/net8.0
+**/obj/
+**/bin/

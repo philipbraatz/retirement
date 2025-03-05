@@ -13,14 +13,15 @@ public static class SocialSecurity
         const double piaPercent2 = 0.32;
         const double piaPercent3 = 0.15;
 
-        double pia = averageEarnings * piaPercent1;
-        if (averageEarnings <= bendPoint2)
-            pia += (averageEarnings - bendPoint1) * piaPercent2;
-        else
-            pia += (bendPoint2 - bendPoint1) * piaPercent2 +
-                   (averageEarnings - bendPoint2) * piaPercent3;
-
-        return pia;
+        return averageEarnings switch
+        {
+            <= bendPoint1 => averageEarnings * piaPercent1,
+            <= bendPoint2 => bendPoint1 * piaPercent1 +
+                (averageEarnings - bendPoint1) * piaPercent2,
+            _ => bendPoint1 * piaPercent1 +
+                (bendPoint2 - bendPoint1) * piaPercent2 +
+                (averageEarnings - bendPoint2) * piaPercent3,
+        };
     }
 
     public static double AdjustForClaimingAge(double pia, int claimingAge, int RetirementAge)
@@ -51,8 +52,8 @@ public static class SocialSecurity
     {
         int fra = GetFullRetirementAge(birthYear);
         double pia = CalculatePIA(averageEarnings);
-        double adjustedBenefit = AdjustForClaimingAge(pia, claimingAge, birthYear);
-        int yearsUntilClaiming = claimingAge - (DateTime.Now.Year - birthYear);
+        double adjustedBenefit = AdjustForClaimingAge(pia, claimingAge, fra);
+        int yearsUntilClaiming = claimingAge - fra;
 
         return ApplyCOLA(adjustedBenefit, yearsUntilClaiming);
     }

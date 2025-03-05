@@ -58,9 +58,10 @@ public static class TaxBrackets
             .Where(bracket => income > bracket.LowerBound)
             .Sum(bracket => (Math.Min(income, bracket.UpperBound) - bracket.LowerBound) * bracket.Rate);
 
-    public static double GetOptimalRothConversionAmount(Person person)
+    public static double GetOptimalRothConversionAmount(Person person, DateOnly date)
     {
-        double taxableIncome = person.IncomeYearly + person.RothConversionsThisYear;
+        double taxableIncome = person.IncomeYearly + person.Investments.Accounts.FirstOrDefault(f => f is RothIRAAccount)
+            .DepositHistory.Where(d => d.Date.Year == date.Year).Sum(d => d.Amount);
 
         // Find the highest bracket we can fill without exceeding
         foreach (var bracket in Brackets[person.FileType])

@@ -1,47 +1,42 @@
-
+using RetirementPlanner.IRS;
 using static RetirementPlanner.TaxBrackets;
 
 namespace RetirementPlanner;
 
-public class Person
+public class Person(params InvestmentAccount[] accounts)
 {
     public DateTime BirthDate { get; set; }
-    public int CurrentAge => DateTime.Now.Year - BirthDate.Year;
+    public int CurrentAge(DateOnly date) => date.Year - BirthDate.Year;
     public bool GenderMale { get; set; }
     public int FullRetirementAge { get; set; }
     public int PartTimeAge { get; set; }
     public int PartTimeEndAge { get; set; }
-    public double CurrentSalary { get; set; }
     public double SalaryGrowthRate { get; set; }
-
-    public double InflationRate { get; set; } = 0.02; // Default 2%
+    public double InflationRate { get; set; } = 0.02;
     public FileType FileType { get; set; } = FileType.Single;
 
-    public double IncomeYearly { get; set; }
+    public List<Job> Jobs { get; set; } = new();
+    public double IncomeYearly => Jobs.Sum(job => job.CalculateAnnualIncome());
     public double TaxRate => TaxBrackets.CalculateTaxes(FileType, IncomeYearly);
 
-    // Part-Time Job Details
-    public double PartTimeSalary { get; set; }
-
-    // Contributions
-    public double Personal401kContributionRate { get; set; }
-    public double EmployerMatchPercentage { get; set; }
+    public InvestmentManager Investments { get; set; } = new(accounts);
 
     // Expenses
     public double EssentialExpenses { get; set; }  // Must be paid (rent, food, healthcare)
     public double DiscretionarySpending { get; set; }  // Wants (travel, hobbies)
 
-    public List<InvestmentAccount> Accounts { get; set; } = [];
-
-    public InvestmentAccount? GetAccount(AccountType type)
-    {
-        return Accounts.FirstOrDefault(acc => acc.Type == type);
-    }
-
-    public double RothConversionsThisYear { get; set; } = 0;
-
-
     // Social Security
     public int SocialSecurityClaimingAge { get; set; }
     public double SocialSecurityIncome { get; set; }
+
+    public void ApplyYearlyPayRaises() => Jobs.ForEach(j => j.ApplyYearlyPayRaise());
+    public double CalculateTotalNetPay() => Jobs.Sum(job => job.CalculateNetPay(TaxRate));
+    public double CalculateTotal401kContributions() => Jobs.Sum(job => job.CalculatePersonal401kContribution() + job.CalculateCompanyMatchContribution());
+
+    public double CalculateCurrentSocialSecurityBenefits(DateTime retirementDate)
+    {
+        int retirementAge = retirementDate.Year - BirthDate.Year;
+        return SocialSecurity.CalculateSocialSecurityBenefit(BirthDate.Year, retirementAge, IncomeYearly) / 12;
+    }
 }
+
