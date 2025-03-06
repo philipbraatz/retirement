@@ -56,21 +56,23 @@ public class RetirementPlanner
                 yearlyTaxesOwed = ApplyYearlyTaxes(person);
             }
 
-            // Store history with exact date
-            history.Add(new FinancialSnapshot
+        // Collect data for each account
+        foreach (var account in person.Investments.Accounts)
+        {
+            double deposits = account.DepositHistory.Where(d => d.Date.Year == currentDate.Year && d.Date.Month == currentDate.Month).Sum(d => d.Amount);
+            double withdrawals = account.WithdrawalHistory.Where(w => w.Date.Year == currentDate.Year && w.Date.Month == currentDate.Month).Sum(w => w.Amount);
+            double balance = account.Balance(currentDate);
+
+            history.Add(new MonthlyAccountSummary
             {
                 Date = currentDate,
-                Salary = person.IncomeYearly,
-                SocialSecurityIncome = person.SocialSecurityIncome,
-                TotalIncome = totalIncome,
-                EssentialExpenses = person.EssentialExpenses,
-                DiscretionarySpending = person.DiscretionarySpending,
-                TotalExpenses = totalExpenses,
-                Withdrawals = totalWithdrawn,
-                SurplusBalance = person.Investments.Accounts.Where(w => w.Name == nameof(AccountType.Savings)).Sum(s => s.Balance(currentDate)),
-                Account401kBalance = person.Investments.Accounts.Where(w => w is TraditionalAccount).Sum(s => s.Balance(currentDate)),
-                RothIRABalance = person.Investments.Accounts.Where(w => w is RothIRAAccount).Sum(s => s.Balance(currentDate))
+                AccountName = account.Name,
+                Deposits = deposits,
+                Withdrawals = withdrawals,
+                TotalBalance = balance
             });
+        }
+
 
             PrintColoredLine($"Age {person.CurrentAge(currentDate)}\t", person.Investments.Accounts.Select(a => $"{a.Name}={a.Balance:C}").ToArray(), (person.EssentialExpenses + person.DiscretionarySpending) / 12);
 
