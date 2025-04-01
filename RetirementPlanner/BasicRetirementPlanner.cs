@@ -1,19 +1,42 @@
+using RetirementPlanner.Event;
+using static RetirementPlanner.RetirementPlanner;
+
 namespace RetirementPlanner;
 
-public class RetirementPlanner
+public class RetirementPlanner(Person person, Options? options = null)
 {
-    public static double AdjustSalary(double currentSalary, double growthRate, int years)
+    public class Options
     {
-        return currentSalary * Math.Pow(1 + growthRate, years);
+        public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+        public DateOnly EndDate { get; set; } = DateOnly.FromDateTime(DateTime.Now.AddYears(110));
+        public TimeSpan ReportGranularity { get; set; } = TimeSpan.FromDays(30);
+        public TimeSpan TimeStep { get; set; } = TimeSpan.FromDays(1);
     }
 
-    public static double CalculateSEPP(Person person, DateTime date)
+    private readonly Options _Options = options ?? new();
+    public DateOnly CurrentDate { get; private set; } = (options ?? new()).StartDate;
+    public DateOnly LastReportDate { get; private set; } = (options ?? new()).StartDate.AddDays(-1);
+
+    public static event EventHandler<DatedEventArgs> NewYear;
+    public static event EventHandler<PayTaxesEventArgs> PayTaxes;
+    public static event EventHandler<DatedEventArgs> Birthday;
+    public static event EventHandler<DatedEventArgs> OnRetired;
+    public static event EventHandler<DatedEventArgs> OnFullRetirementAge;
+    public static event EventHandler<DatedEventArgs> OnRMDAgeHit;
+    public static event EventHandler<DatedEventArgs> OnSocialSecurityClaimingAgeHit;
+    public static event EventHandler<MoneyShortfallEventArgs> OnMoneyShortfall;
+    public static event EventHandler<DatedEventArgs> OnBroke;
+    public static event EventHandler<JobPayEventArgs> OnJobPay;
+    public static event EventHandler<DatedEventArgs> OnNewMonth;
+    public static event EventHandler<SpendingEventArgs> OnSpending;
+
+    public double CalculateSEPP(DateTime date)
     {
         //double lifeExpectancy = LifeExpectancyTable.GetLifeExpectancy(person.CurrentAge(date), person.GenderMale);
         return 0; //return person.GetAccount(AccountType.Traditional401k).Balance / lifeExpectancy;
     }
 
-    public static double GetTaxableSocialSecurity(Person person, double totalIncome)
+    public double GetTaxableSocialSecurity(double totalIncome)
     {
         double provisionalIncome = totalIncome + (person.SocialSecurityIncome * 0.5);
 
@@ -22,39 +45,66 @@ public class RetirementPlanner
         return person.SocialSecurityIncome * 0.85; // 85% taxable
     }
 
-    public static void RunRetirementSimulation(Person person)
-    {
-        DateOnly startDate = new(DateTime.Now.Year, 1, 1);
-        DateOnly endDate = new(person.BirthDate.Year + 100, 1, 1);
-        DateOnly currentDate = startDate;
+    private bool isRetired;
+    private bool claimedSocialSecurity;
+    private bool rmdTriggered;
 
-        List<FinancialSnapshot> history = new();
-        double yearlyTaxesOwed = 0;
+    public async Task RunRetirementSimulation()
+    {
+        if (_Options.ReportGranularity < TimeSpan.FromDays(1))
+            throw new ArgumentException("Granularity must be at least one day");
 
         Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine($"Started retirement for {person.BirthDate} with {person.Investments.Accounts.Count} accounts");
+        Console.WriteLine($"Started simulation for {person.BirthDate} with {person.Investments.Accounts.Count} accounts");
         Console.ResetColor();
 
-        while (currentDate < endDate)
+        List<MonthlyAccountSummary> history = [];
+        double yearlyTaxesOwed = 0;
+
+        while (CurrentDate < _Options.EndDate)
         {
-            int age = currentDate.Year - person.BirthDate.Year;
-            bool isRetired = age >= person.FullRetirementAge;
-
-            // Apply salary increases and adjust contributions on January 1st
-            if (currentDate.Month == 1 && currentDate.Day == 1)
+            await Task.Run(() =>
             {
-                person.ApplyYearlyPayRaises();
-                person.EssentialExpenses *= (1 + person.InflationRate);
-                person.DiscretionarySpending *= (1 + person.InflationRate);
-            }
+                yearlyTaxesOwed += Simulate(CurrentDate);
 
-            SimulateMonth(person, currentDate, age, out double totalExpenses, out double totalIncome, out double totalWithdrawn);
+                if (CurrentDate.ToDateTime(TimeOnly.MinValue) - LastReportDate.ToDateTime(TimeOnly.MinValue) >= _Options.ReportGranularity)
+                    LastReportDate = Report(CurrentDate, history);
 
-            // Apply yearly taxes at the end of December
-            if (currentDate.Month == 12)
-            {
-                yearlyTaxesOwed = ApplyYearlyTaxes(person);
-            }
+                if (person.Investments.Accounts.All(a => a.Balance(CurrentDate) <= 0))
+                {
+                    LowBalanceSimulationEnd(CurrentDate);
+                    CurrentDate = _Options.EndDate;
+                    return;
+                }
+
+            });
+
+            CurrentDate = CurrentDate.AddDays((int)_Options.TimeStep.TotalDays);
+        }
+
+        Export(history);
+    }
+
+    private void Export(List<MonthlyAccountSummary> history)
+    {
+        Helpers.ExportToCSV(history, $"retirement_simulation_{person.PartTimeEndAge}_{person.BirthDate.Year}.csv");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine("Exported");
+        Console.ResetColor();
+    }
+
+    private void LowBalanceSimulationEnd(DateOnly currentDate)//, (TransactionCategory, double)[] paymentsMissed)
+    {
+        OnBroke?.Invoke(this, new DatedEventArgs { Date = currentDate });
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"All account balances are zero at age {currentDate.Year - person.BirthDate.Year}. Goal of {person.PartTimeEndAge}/{person.FullRetirementAge}. Ending simulation.");
+        //Console.WriteLine($"\tPayments missed: {string.Join(", ", paymentsMissed.Select(p => $"{p.Item1}={p.Item2:C}"))}");
+        Console.ResetColor();
+    }
+
+    private DateOnly Report(DateOnly currentDate, List<MonthlyAccountSummary> history)
+    {
+        DateOnly lastReported = currentDate;
 
         // Collect data for each account
         foreach (var account in person.Investments.Accounts)
@@ -63,7 +113,7 @@ public class RetirementPlanner
             double withdrawals = account.WithdrawalHistory.Where(w => w.Date.Year == currentDate.Year && w.Date.Month == currentDate.Month).Sum(w => w.Amount);
             double balance = account.Balance(currentDate);
 
-            history.Add(new MonthlyAccountSummary
+            history.Add(new()
             {
                 Date = currentDate,
                 AccountName = account.Name,
@@ -73,182 +123,91 @@ public class RetirementPlanner
             });
         }
 
+        //PrintColoredLine($"Age {person.CurrentAge(currentDate)}\t", person.Investments.Accounts.Select(a => (a.Balance(currentDate), $"{a.Name}={a.Balance(currentDate):C}")).ToArray(), (person.EssentialExpenses + person.DiscretionarySpending) / 12);
+        return lastReported;
+    }
 
-            PrintColoredLine($"Age {person.CurrentAge(currentDate)}\t", person.Investments.Accounts.Select(a => $"{a.Name}={a.Balance:C}").ToArray(), (person.EssentialExpenses + person.DiscretionarySpending) / 12);
+    public double Simulate(DateOnly currentDate)
+    {
+        double yearlyTaxesOwed = 0;
+        int age = currentDate.Year - person.BirthDate.Year;
 
-            // Check if all balances are zero
-            if (person.Investments.Accounts.All(a => a.Balance(currentDate) <= 0))
-            {
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine($"All account balances are zero at age {currentDate.Year - person.BirthDate.Year}. Goal of {person.PartTimeEndAge}/{person.FullRetirementAge}. Ending simulation.");
-                Console.ResetColor();
+        switch (currentDate)
+        {
+            case { Month: 1, Day: 1 }:
+                NewYear?.Invoke(person, new() { Date = currentDate });
                 break;
-            }
+            case { Month: 12, Day: 1 }:
+                yearlyTaxesOwed = ApplyYearlyTaxes();
+                PayTaxes?.Invoke(person, new() { Date = currentDate, TaxesOwed = yearlyTaxesOwed });
+                break;
 
-            // Move to the next time step
-            currentDate = currentDate.AddMonths(1);
+            case { Day: 1 }:
+                // Currently handles: Investment growth, spending monthly expenses
+                OnNewMonth?.Invoke(person, new() { Date = currentDate });
+                break;
+
+            case { Month: var month, Day: var day } when month == person.BirthDate.Month && day == person.BirthDate.Day:
+                Birthday?.Invoke(person, new() { Date = currentDate, Age = age });
+                break;
         }
 
-        // Export results
-        Helpers.ExportToCSV(history, $"retirement_simulation_{person.FullRetirementAge}_{person.BirthDate.Year}.csv");
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine("Exported");
-        Console.ResetColor();
-    }
-
-    private static void SimulateMonth(Person person, DateOnly date, int age, out double totalExpenses, out double totalIncome, out double totalWithdrawn)
-    {
-        // Calculate Income Before Taxes
-        if (person.SocialSecurityIncome == 0)
+        if (!isRetired && age == person.FullRetirementAge)
         {
-            person.SocialSecurityIncome = (age >= person.SocialSecurityClaimingAge)
-                ? person.CalculateCurrentSocialSecurityBenefits(date.ToDateTime(TimeOnly.MinValue))
-                : 0;
+            OnFullRetirementAge?.Invoke(person, new() { Date = currentDate, Age = age });
+            isRetired = true;
+        }
+        if (!claimedSocialSecurity && age == person.SocialSecurityClaimingAge)
+        {
+            OnSocialSecurityClaimingAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
+            claimedSocialSecurity = true;
+        }
+        if (!rmdTriggered && age == 73)
+        {
+            OnRMDAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
+            rmdTriggered = true;
         }
 
-        totalExpenses = (person.EssentialExpenses + person.DiscretionarySpending) / 12;
-        totalIncome = person.CalculateTotalNetPay() / 12 + person.SocialSecurityIncome;
-
-        // Deduct Taxes from Total Income
-        double monthlyTaxOwed = ApplyYearlyTaxes(person) / 12;
-        totalIncome = Math.Max(0, totalIncome - monthlyTaxOwed);
-
-        // Deposit Post-Tax Income into Taxable Account
-        var taxableAccount = person.Investments.Accounts.FirstOrDefault(w => w.Name == nameof(AccountType.Savings));
-        taxableAccount?.Deposit(totalIncome, date, TransactionCategory.Income);
-
-        double withdrawalNeeded = Math.Max(0, totalExpenses);
-        totalWithdrawn = 0;
-
-        // Apply Required Minimum Distributions (RMDs) first at age 73+
-        double rmdWithdrawn = 0;
-        if (age >= 73)
+        // Social Security, RMD withdrawals are handled as special kind of jobs (More like income sources)
+        foreach (var j in person.Jobs.Where(j => j.IsPayday(currentDate) &&
+                (person.PartTimeEndAge > age || j.Type == JobType.Unemployed)
+            ).ToList())
         {
-            var rothAccount = person.Investments.Accounts.FirstOrDefault(w => w is RothIRAAccount);
-
-            rmdWithdrawn = ProcessRMDWithdrawal(person, date);
-            rothAccount?.Deposit(rmdWithdrawn, date, TransactionCategory.InternalTransfer);
-        }
-
-        // Perform Roth Conversion AFTER RMDs to Reflect Tax Impact
-        if (age >= 59.5)
-        {
-            person.Investments.PerformRothConversion(person, date);
-        }
-
-        // Withdraw in Tax-Efficient Order
-        List<AccountType> accountTypePriorities = [AccountType.Savings];
-
-        if (age > person.PartTimeEndAge)
-        {
-            accountTypePriorities.Add(AccountType.RothIRA);
-
-            if (age >= 59.5)
+            OnJobPay?.Invoke(person, new()
             {
-                accountTypePriorities.Add(AccountType.TraditionalIRA);
-                accountTypePriorities.Add(AccountType.Traditional401k);
-            }
-            else
-            {
-                accountTypePriorities.Add(AccountType.Traditional401k);
-                accountTypePriorities.Add(AccountType.TraditionalIRA);
-            }
+                Date = currentDate,
+                Job = j,
+                GrossIncome = j.CalculateMonthlyIncome(j.HoursWorkedWeekly)
+            });
         }
 
-        foreach (var accountType in accountTypePriorities)
-        {
-            TryWithdraw(person, date, accountType, ref withdrawalNeeded);
-        }
-
-        // If Still Short on Funds, Withdraw from Other Accounts (With Penalties if Needed)
-        if (withdrawalNeeded > 0 && age <= person.PartTimeEndAge)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Shortfall detected: {withdrawalNeeded:C}. Pulling from other accounts...");
-            Console.ResetColor();
-
-            List<AccountType> penaltyAccounts = new() { AccountType.Traditional401k, AccountType.TraditionalIRA, AccountType.RothIRA };
-            foreach (var accountType in penaltyAccounts)
-            {
-                TryWithdraw(person, date, accountType, ref withdrawalNeeded);
-                if (withdrawalNeeded <= 0) break;
-            }
-        }
-
-        // Apply Investment Growth
-        person.Investments.ApplyMonthlyGrowth(date);
-
-        // Print monthly summary
-        PrintMonthlySummary(totalIncome, taxableAccount, totalExpenses, totalWithdrawn);
+        return yearlyTaxesOwed;
     }
 
-    public static void TryWithdraw(Person person, DateOnly date, AccountType accountType, ref double withdrawalNeeded)
-    {
-        if (withdrawalNeeded <= 0) return;
-
-        var accounts = person.Investments.Accounts.Where(acc => acc.Name == accountType.ToString() && acc.Balance(date) > 0);
-        foreach (var account in accounts)
-        {
-            double amountWithdrawn = account.Withdraw(withdrawalNeeded, date, TransactionCategory.Withdrawal);
-            withdrawalNeeded -= amountWithdrawn;
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\t Withdrawing {amountWithdrawn:C} from {account.Name}");
-            Console.ResetColor();
-
-            if (withdrawalNeeded <= 0) break;
-        }
-    }
-
-    private static double ProcessRMDWithdrawal(Person person, DateOnly date)
-    {
-        double totalRMD = 0;
-        foreach (TraditionalAccount account in person.Investments.Accounts.Select(a => a as TraditionalAccount).Where(w => w is not null))
-        {
-            double rmd = account!.RequiredMinimalDistributions(date);
-            totalRMD += rmd;
-            account.Withdraw(rmd, date, TransactionCategory.Withdrawal);
-        }
-        return totalRMD;
-    }
-
-    private static double ApplyYearlyTaxes(Person person)
+    private double ApplyYearlyTaxes()
     {
         double totalTaxableIncome = person.Jobs.Sum(s => s.CalculateTaxableIncome());
 
         // Include taxable portion of Social Security
-        totalTaxableIncome += GetTaxableSocialSecurity(person, person.IncomeYearly);
+        totalTaxableIncome += GetTaxableSocialSecurity(person.IncomeYearly);
 
         // Sum taxable withdrawals from tax-deferred accounts (401k, Traditional IRA)
-        totalTaxableIncome += person.Investments.Accounts.Select(a => a as TraditionalAccount).Where(w => w is not null)
-            .Sum(s => s!.WithdrawalHistory.Where(w => w.Date.Year == DateTime.Now.Year).Sum(s => s.Amount));
+        totalTaxableIncome += person.Investments.Accounts.Select(a => a as Traditional401kAccount)
+            .Sum(s => s?.WithdrawalHistory.Where(w => w.Date.Year == DateTime.Now.Year)
+                .Sum(s => s.Amount) ?? 0);
 
         return TaxBrackets.CalculateTaxes(person.FileType, Math.Max(0, totalTaxableIncome));
     }
 
-    private static void PrintColoredLine(string text, string[] moneyValues, double monthlyExpenses)
+    private static void PrintColoredLine(string text, (double, string)[] moneyValues, double monthlyExpenses)
     {
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.Write(text);
         foreach (var moneyValue in moneyValues)
         {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.Write($"{moneyValue}\t");
+            Console.ForegroundColor = moneyValue.Item1 > 1000 ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.Write($"{moneyValue.Item2}\t");
         }
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine($"\t PAID: {monthlyExpenses:C}");
-        Console.ResetColor();
-    }
-
-    private static void PrintMonthlySummary(double totalIncome, InvestmentAccount taxableAccount, double totalExpenses, double totalWithdrawn)
-    {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($"Income: {totalIncome:C} -> {taxableAccount?.Name}\t");
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Write($"Expenses: {totalExpenses:C}\t");
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Withdrawn: {totalWithdrawn:C}");
         Console.ResetColor();
     }
 }
-

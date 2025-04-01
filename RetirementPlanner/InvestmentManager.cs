@@ -9,7 +9,7 @@ public class InvestmentManager(IEnumerable<InvestmentAccount> accounts)
         double conversionLimit = TaxBrackets.GetOptimalRothConversionAmount(person, date);
         if (conversionLimit <= 0) return; // No conversion if already in high tax bracket
 
-        var traditionalAccounts = Accounts.Where(a => a is TraditionalAccount && a.Balance(date) > 0);
+        var traditionalAccounts = Accounts.Where(a => a is Traditional401kAccount && a.Balance(date) > 0);
         var rothAccount = Accounts.FirstOrDefault(a => a is RothIRAAccount);
 
         if (rothAccount == null || !traditionalAccounts.Any()) return; // No Roth IRA available
@@ -30,6 +30,7 @@ public class InvestmentManager(IEnumerable<InvestmentAccount> accounts)
             rothAccount.Deposit(conversionAmount, date, TransactionCategory.InternalTransfer);
             conversionLimit -= conversionAmount;
         }
+        Console.WriteLine();
     }
 
     public void ApplyMonthlyGrowth(DateOnly date) => Accounts.ForEach(a => a.ApplyMonthlyGrowth(date));

@@ -7,10 +7,12 @@ public static class ContributionLimits
     public const double Max401kCatchUp60to63 = 11250; // 2025 catch-up contribution for 60 to 63 years old
     public const double Max401kTotal = 66500;     // 2024 total (personal + employer)
     public const double CompensationLimit = 330000; // Max salary considered for employer match
+    public const double EmployerLimit = 69000; // Max salary considered for employer match
+    public const double EmployerCatchUpLimit = 76500; // Max salary considered for employer match for 50 and older
 
     public static double Limit401kPersonal(double personalContributions, double personalRate, double age)
     {
-        double baseLimit = Math.Min(personalContributions * personalRate, Max401kPersonal);
+        double baseLimit = Math.Max(personalContributions * personalRate, Max401kPersonal);
         double catchUpLimit = 0;
 
         if (age >= 50 && age < 60)
@@ -23,6 +25,12 @@ public static class ContributionLimits
         }
 
         return baseLimit + catchUpLimit;
+    }
+
+    public static double Limit401kEmployer(double currentPersonal, double employerContribution, int age)
+    {
+        double totalLimit = (age >= 50) ? EmployerCatchUpLimit : EmployerLimit; // Catch-up at age 50
+        return Math.Max(0, totalLimit - currentPersonal - employerContribution);
     }
 
     public static double LimitCompensation(double salary) => Math.Min(salary, CompensationLimit);

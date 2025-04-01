@@ -1,6 +1,6 @@
 namespace RetirementPlanner;
 
-public class Job
+public class IncomeSource
 {
     public string Title { get; set; }
     public DateOnly StartDate { get; set; }
@@ -13,8 +13,9 @@ public class Job
     public PaymentType PaymentType { get; set; }
     public double? Personal401kContributionPercent { get; set; }
     public double? CompanyMatchContributionPercent { get; set; }
+    public PayFrequency PayFrequency { get; set; }
 
-    public double CalculateAnnualIncome()
+    public double GrossAnnualIncome()
     {
         double baseIncome = PaymentType switch
         {
@@ -30,26 +31,33 @@ public class Job
         PaymentType.Hourly => Salary * hoursWorked * 4,
         PaymentType.Salaried => Salary / 12,
         _ => 0
-    } + BonusPay / 12;
+    } + (BonusPay / 12);
 
-    public void ApplyYearlyPayRaise()
-    {
-        Salary *= (1 + PayRaisePercent);
-    }
+    public void ApplyYearlyPayRaise() => Salary *= 1 + PayRaisePercent;
 
-    public double CalculatePersonal401kContribution() => Personal401kContributionPercent.HasValue ? CalculateAnnualIncome() * Personal401kContributionPercent.Value : 0;
+    public double CalculatePersonal401kContribution() => Personal401kContributionPercent.HasValue ? GrossAnnualIncome() * Personal401kContributionPercent.Value : 0;
 
-    public double CalculateCompanyMatchContribution() => CompanyMatchContributionPercent.HasValue ? CalculateAnnualIncome() * CompanyMatchContributionPercent.Value : 0;
+    public double CalculateCompanyMatchContribution() => CompanyMatchContributionPercent.HasValue ? GrossAnnualIncome() * CompanyMatchContributionPercent.Value : 0;
 
-    public double CalculateTaxableIncome() => CalculateAnnualIncome() - CalculatePersonal401kContribution();
+    public double CalculateTaxableIncome() => GrossAnnualIncome() - CalculatePersonal401kContribution();
     public double CalculateNetPay(double taxRate)
     {
-        var grossIncome = CalculateAnnualIncome();
+        var grossIncome = GrossAnnualIncome();
         var personal401kContribution = CalculatePersonal401kContribution();
         var taxableIncome = grossIncome - personal401kContribution;
         var taxesOwed = taxableIncome * taxRate;
         return grossIncome - personal401kContribution - taxesOwed;
     }
+
+
+    public bool IsPayday(DateOnly date) => PayFrequency switch
+    {
+        PayFrequency.Weekly => date.DayOfWeek == DayOfWeek.Friday,
+        PayFrequency.BiWeekly => (date.DayOfYear % 14) == 0,
+        PayFrequency.SemiMonthly => date.Day == 15 || date.Day == DateTime.DaysInMonth(date.Year, date.Month),
+        PayFrequency.Monthly => date.Day == DateTime.DaysInMonth(date.Year, date.Month),
+        _ => false
+    };
 }
 
 public enum JobType
@@ -66,3 +74,10 @@ public enum PaymentType
     Salaried
 }
 
+public enum PayFrequency
+{
+    Weekly = 52,
+    BiWeekly = 52 / 2,
+    SemiMonthly = 12 * 2,
+    Monthly = 12
+}

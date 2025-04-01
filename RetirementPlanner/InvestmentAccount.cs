@@ -19,39 +19,50 @@ public class FinancialSnapshot
     public double TaxableBalance { get; set; }
 }
 
-public class InvestmentAccount(double annualGrowthRate, string name, double startingBalance = 0)
+public class InvestmentAccount(double annualGrowthRate, string name, AccountType type)
 {
     public string Name { get; } = name;
     public double AnnualGrowthRate { get; } = annualGrowthRate;
     public double MonthlyContribution { get; set; }
+    public readonly AccountType Type = type;
 
     public Dictionary<int, double> YearlyStartingBalances { get; } = [];
     public List<(double Amount, DateOnly Date, TransactionCategory Category)> DepositHistory { get; } = [];
     public List<(double Amount, DateOnly Date, TransactionCategory Category)> WithdrawalHistory { get; } = [];
 
+    public InvestmentAccount(double annualGrowthRate, string name, double startingBalance, AccountType type) : this(annualGrowthRate, name, type)
+    {
+        Deposit(startingBalance, DateOnly.FromDateTime(DateTime.MinValue), TransactionCategory.InternalTransfer);
+        Console.WriteLine();
+    }
+
     public double Balance(DateOnly date)
     {
         int year = date.Year;
-        if (!YearlyStartingBalances.ContainsKey(year))
-            return 0;
 
-        double startingBalance = YearlyStartingBalances[year];
-        double deposits = DepositHistory.Where(d => d.Date.Year == year).Sum(d => d.Amount);
-        double withdrawals = WithdrawalHistory.Where(w => w.Date.Year == year).Sum(w => w.Amount);
+        // Get the desired year or the latest year before the desired year
+        if (!YearlyStartingBalances.TryGetValue(date.Year, out var startingBalance))
+        {
+            if (!YearlyStartingBalances.Any())
+                YearlyStartingBalances.Add(date.Year - 1, 0);
+
+            var yearBalance = YearlyStartingBalances.Where(y => y.Key < date.Year).OrderByDescending(o => o.Key).First();
+            year = yearBalance.Key;
+            startingBalance = yearBalance.Value;
+        }
+
+        double deposits = DepositHistory.Where(d => d.Date.Year >= year && d.Date <= date).Sum(d => d.Amount);
+        double withdrawals = WithdrawalHistory.Where(w => w.Date.Year >= year && w.Date <= date).Sum(w => w.Amount);
 
         return startingBalance + deposits - withdrawals;
     }
 
     private double CalcStartOfYearBalance(int year)
     {
-        if (year == DateTime.Now.Year)
-        {
-            return YearlyStartingBalances.ContainsKey(year - 1) ? YearlyStartingBalances[year - 1] : 0;
-        }
-
-        double previousYearBalance = YearlyStartingBalances.ContainsKey(year - 1) ? YearlyStartingBalances[year - 1] : 0;
-        double previousYearDeposits = DepositHistory.Where(d => d.Date.Year == year - 1).Sum(d => d.Amount);
-        double previousYearWithdrawals = WithdrawalHistory.Where(w => w.Date.Year == year - 1).Sum(w => w.Amount);
+        var previousYear = YearlyStartingBalances.Where(m => m.Key < year).Max(k => k.Key);
+        double previousYearBalance = YearlyStartingBalances[previousYear];
+        double previousYearDeposits = DepositHistory.Where(d => d.Date.Year >= previousYear && year > d.Date.Year).Sum(d => d.Amount);
+        double previousYearWithdrawals = WithdrawalHistory.Where(w => w.Date.Year >= previousYear && year > w.Date.Year).Sum(w => w.Amount);
 
         return previousYearBalance + previousYearDeposits - previousYearWithdrawals;
     }
@@ -61,6 +72,7 @@ public class InvestmentAccount(double annualGrowthRate, string name, double star
         double monthlyRate = Math.Pow(1 + AnnualGrowthRate, 1.0 / 12) - 1;
         double growthAmount = Balance(date) * monthlyRate;
         Deposit(growthAmount, date, TransactionCategory.Intrest);
+        Console.WriteLine();
     }
 
     public virtual double Withdraw(double amount, DateOnly date, TransactionCategory category)
@@ -77,14 +89,32 @@ public class InvestmentAccount(double annualGrowthRate, string name, double star
 
     public virtual double Deposit(double amount, DateOnly date, TransactionCategory category)
     {
+        if (amount <= 0) return 0;
+
+        if (!YearlyStartingBalances.Any())
+        {   // Ensure a balance exists.
+            YearlyStartingBalances.Add(date.Year, 0);
+        }
+
+        if (!YearlyStartingBalances.ContainsKey(date.Year))
+        {   // Set this years balance to the previously found years balance.
+            YearlyStartingBalances[date.Year] = CalcStartOfYearBalance(date.Year);
+        }
+
         DepositHistory.Add((amount, date, category));
 
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.Write($"\t=> {amount:C} Into {Name} ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write($"[ {Balance(date):C0} ]");
+        Console.ResetColor();
         return amount;
     }
 }
 
-public class RothIRAAccount(double annualGrowthRate, string name, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance)
+public class RothIRAAccount(double annualGrowthRate, string name, Person person, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.RothIRA)
 {
+    public Person Owner { get; } = person;
 
     public override double Withdraw(double amount, DateOnly date, TransactionCategory category)
     {
@@ -122,9 +152,35 @@ public class RothIRAAccount(double annualGrowthRate, string name, double startin
         var withdrawalAmount = base.Withdraw(amount, date, category);
         return withdrawalAmount;
     }
+
+    public override double Deposit(double amount, DateOnly date, TransactionCategory category)
+    {
+        double personalContributions = DepositHistory
+            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
+            .Sum(d => d.Amount);
+
+        // Use TaxCalculator to determine taxable income
+        TaxCalculator taxCalculator = new(Owner, date.Year);
+
+        // Apply Roth IRA contribution limits based on taxable income
+        double limit = LimitRothIRA(personalContributions, person.TaxableIncome, Owner.CurrentAge(date));
+
+        double amountToDeposit = Math.Min(amount, limit - personalContributions);
+        return base.Deposit(amountToDeposit, date, category);
+    }
+
+
+    public static double LimitRothIRA(double currentContribution, double income, int age)
+    {
+        double limit = (age >= 50) ? 8000 : 7000; // Catch-up at age 50
+        if (income > 161000) return 0; // Above income limit, no Roth contributions
+        if (income > 146000) return Math.Max(0, limit - ((income - 146000) / (161000 - 146000) * limit)); // Phase-out
+
+        return Math.Max(0, limit - currentContribution);
+    }
 }
 
-public class TraditionalAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance)
+public class Traditional401kAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Traditional401k)
 {
     private readonly DateOnly birthdate = birthdate;
 
@@ -147,11 +203,11 @@ public class TraditionalAccount(double annualGrowthRate, string name, DateOnly b
         }
         else if (category == TransactionCategory.ContributionEmployer)
         {
-            limit = ContributionLimits.Max401kTotal - personalContributions;
+            limit = ContributionLimits.Limit401kEmployer(personalContributions, employerContributions, date.Year - birthdate.Year);
         }
 
-        double amountToDeposit = Math.Min(amount, limit - totalContributions);
-        base.Deposit(amountToDeposit, date, category);
+        double amountToDeposit = amount + totalContributions > limit ? limit : amount;
+        amountToDeposit = base.Deposit(amountToDeposit, date, category);
         return amountToDeposit;
     }
 
@@ -188,7 +244,7 @@ public enum TransactionCategory
     ContributionPersonal,
     ContributionEmployer,
     Intrest,
-    Withdrawal,
+    Expenses,
     Taxes,
     EarlyWithdrawalPenality,
     InternalTransfer,

@@ -10,9 +10,9 @@ public static class TaxBrackets
     }
     public enum FileType
     {
-        Single,
-        MarriedFilingJointly,
-        HeadOfHousehold
+        Single = 13850,
+        MarriedFilingJointly = 27700,
+        HeadOfHousehold = 20800
     }
 
     public static Dictionary<FileType, Bracket[]> Brackets = new()
