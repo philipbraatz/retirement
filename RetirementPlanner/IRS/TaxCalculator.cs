@@ -43,10 +43,45 @@ public class TaxCalculator(Person person, int taxYear)
 
     private double GetTaxableSocialSecurity()
     {
-        double provisionalIncome = Person.IncomeYearly + Person.SocialSecurityIncome * 0.5;
+        // Calculate provisional income: AGI + Non-taxable interest + 50% of Social Security
+        double provisionalIncome = Person.IncomeYearly + (Person.SocialSecurityIncome * 0.5);
+        
+        // Determine taxable portion based on filing status and provisional income
+        return Person.FileType switch
+        {
+            FileType.Single => CalculateTaxableSocialSecuritySingle(provisionalIncome, Person.SocialSecurityIncome),
+            FileType.MarriedFilingJointly => CalculateTaxableSocialSecurityMFJ(provisionalIncome, Person.SocialSecurityIncome),
+            FileType.MarriedFilingSeparately => CalculateTaxableSocialSecurityMFS(provisionalIncome, Person.SocialSecurityIncome),
+            _ => 0
+        };
+    }
 
-        if (provisionalIncome <= 25000) return 0; // No SS taxation (single)
-        if (provisionalIncome <= 34000) return Person.SocialSecurityIncome * 0.50; // 50% taxable
-        return Person.SocialSecurityIncome * 0.85; // 85% taxable
+    private static double CalculateTaxableSocialSecuritySingle(double provisionalIncome, double socialSecurityIncome)
+    {
+        if (provisionalIncome <= 25000) return 0; // No SS taxation
+        if (provisionalIncome <= 34000) return Math.Min(socialSecurityIncome * 0.50, (provisionalIncome - 25000) * 0.50); // Up to 50% taxable
+        
+        // Up to 85% taxable
+        double tier1Tax = Math.Min(socialSecurityIncome * 0.50, 4500); // 50% of (34000-25000)/2
+        double tier2Tax = (provisionalIncome - 34000) * 0.85;
+        return Math.Min(socialSecurityIncome * 0.85, tier1Tax + tier2Tax);
+    }
+
+    private static double CalculateTaxableSocialSecurityMFJ(double provisionalIncome, double socialSecurityIncome)
+    {
+        if (provisionalIncome <= 32000) return 0; // No SS taxation
+        if (provisionalIncome <= 44000) return Math.Min(socialSecurityIncome * 0.50, (provisionalIncome - 32000) * 0.50); // Up to 50% taxable
+        
+        // Up to 85% taxable
+        double tier1Tax = Math.Min(socialSecurityIncome * 0.50, 6000); // 50% of (44000-32000)/2
+        double tier2Tax = (provisionalIncome - 44000) * 0.85;
+        return Math.Min(socialSecurityIncome * 0.85, tier1Tax + tier2Tax);
+    }
+
+    private static double CalculateTaxableSocialSecurityMFS(double provisionalIncome, double socialSecurityIncome)
+    {
+        // Married filing separately has $0 thresholds - most SS income is taxable
+        if (provisionalIncome <= 0) return 0;
+        return Math.Min(socialSecurityIncome * 0.85, provisionalIncome * 0.85);
     }
 }

@@ -33,10 +33,10 @@ public static class LifeEvents
         person.TaxableIncome = grossIncome;
 
         // Calculate retirement contributions
-        double personal401kContribution = grossIncome * (person.Jobs[0].Personal401kContributionPercent.HasValue ? person.Jobs[0].Personal401kContributionPercent.Value : 0);
-        double companyMatchContribution = grossIncome * (person.Jobs[0].CompanyMatchContributionPercent.HasValue ? person.Jobs[0].CompanyMatchContributionPercent.Value * person.Jobs[0].Personal401kContributionPercent.Value : 0);
+        double retirementContribution = grossIncome * (person.Jobs[0].RetirementContributionPercent.HasValue ? person.Jobs[0].RetirementContributionPercent.Value : 0);
+        double companyMatchContribution = grossIncome * (person.Jobs[0].CompanyMatchContributionPercent.HasValue ? person.Jobs[0].CompanyMatchContributionPercent.Value * (person.Jobs[0].RetirementContributionPercent ?? 0) : 0);
 
-        person.TaxableIncome -= personal401kContribution;
+        person.TaxableIncome -= retirementContribution;
 
         // Update RMD IncomeSource every new year
         var rmdIncomeSource = person.Jobs.FirstOrDefault(j => j.Title == "RMD");
@@ -44,18 +44,28 @@ public static class LifeEvents
         {
             rmdIncomeSource.Salary = CalculateRMD(person, e.Date) / 12;
         }
-        // Print the change in balances for each account from the previous year to now
+        // Print the change in balances for each account from two years ago to last year
+        // This gives us a meaningful year-over-year comparison since we're at the start of the current year
         foreach (var account in person.Investments.Accounts)
         {
-            var previousYear = e.Date.Year - 1;
-            var currentYear = e.Date.Year;
+            var twoYearsAgo = e.Date.Year - 2;
+            var lastYear = e.Date.Year - 1;
 
-            var previousYearBalance = account.Balance(new DateOnly(previousYear, 1, 1));
-            var currentYearBalance = account.Balance(new DateOnly(currentYear, 1, 1));
+            // Compare balance from end of two years ago to end of last year
+            var twoYearsAgoEndDate = new DateOnly(twoYearsAgo, 12, 31);
+            var lastYearEndDate = new DateOnly(lastYear, 12, 31);
 
-            var balanceChange = currentYearBalance - previousYearBalance;
+            var twoYearsAgoBalance = account.Balance(twoYearsAgoEndDate);
+            var lastYearBalance = account.Balance(lastYearEndDate);
 
-            Console.WriteLine($"Account: {account.Name}, Previous Year Balance: {previousYearBalance:C}, Current Year Balance: {currentYearBalance:C}, Change: {balanceChange:C}");
+            var balanceChange = lastYearBalance - twoYearsAgoBalance;
+
+            // Only show the comparison if both years have meaningful data
+            // Skip if both balances are the same due to missing YearlyStartingBalances
+            if (balanceChange != 0 || account.YearlyStartingBalances.ContainsKey(twoYearsAgo) || account.YearlyStartingBalances.ContainsKey(lastYear))
+            {
+                Console.WriteLine($"Account: {account.Name}, Year {twoYearsAgo} Balance: {twoYearsAgoBalance:C}, Year {lastYear} Balance: {lastYearBalance:C}, Change: {balanceChange:C}");
+            }
         }
     }
 
@@ -126,16 +136,52 @@ public static class LifeEvents
         var grossIncome = job.GrossAnnualIncome();
         double netIncome = grossIncome;
 
-        // Calculate retirement contributions
-        double personal401kContribution = grossIncome / (int)job.PayFrequency * (job.Personal401kContributionPercent.HasValue ? job.Personal401kContributionPercent.Value : 0);
-        double companyMatchContribution = grossIncome / (int)job.PayFrequency * (job.CompanyMatchContributionPercent.HasValue ? job.CompanyMatchContributionPercent.Value * job.Personal401kContributionPercent.Value : 0);
+        // Determine optimal allocation between Traditional and Roth 401k
+        var (traditionalAmount, rothAmount) = job.CalculateOptimalRetirementAllocation(person, e.Date);
+        
+        // Scale contributions to paycheck frequency
+        traditionalAmount /= (int)job.PayFrequency;
+        rothAmount /= (int)job.PayFrequency;
+        
+        // Total retirement contribution per paycheck
+        double retirementContribution = traditionalAmount + rothAmount;
+        double companyMatchContribution = grossIncome / (int)job.PayFrequency * (job.CompanyMatchContributionPercent.HasValue ? job.CompanyMatchContributionPercent.Value * (job.RetirementContributionPercent ?? 0) : 0);
 
-        netIncome -= personal401kContribution;
+        netIncome -= retirementContribution;
 
         // Deposit contributions into retirement accounts
         var traditional401k = person.Investments.Accounts.FirstOrDefault(w => w is Traditional401kAccount);
-        personal401kContribution = traditional401k?.Deposit(personal401kContribution, e.Date, TransactionCategory.ContributionPersonal) ?? 0;
-        companyMatchContribution = traditional401k?.Deposit(companyMatchContribution, e.Date, TransactionCategory.ContributionEmployer) ?? 0;
+        var roth401k = person.Investments.Accounts.FirstOrDefault(w => w is Roth401kAccount);
+        
+        double actualTraditionalContribution = 0;
+        double actualRothContribution = 0;
+        
+        if (traditionalAmount > 0 && traditional401k != null)
+        {
+            actualTraditionalContribution = traditional401k.Deposit(traditionalAmount, e.Date, TransactionCategory.ContributionPersonal);
+        }
+        
+        if (rothAmount > 0 && roth401k != null)
+        {
+            actualRothContribution = roth401k.Deposit(rothAmount, e.Date, TransactionCategory.ContributionPersonal);
+        }
+        
+        // If no Roth 401k account exists but we want Roth contributions, put in Traditional 401k
+        if (rothAmount > 0 && roth401k == null && traditional401k != null)
+        {
+            actualTraditionalContribution += traditional401k.Deposit(rothAmount, e.Date, TransactionCategory.ContributionPersonal);
+            Console.WriteLine($"\t Note: Roth 401k not available, contributed ${rothAmount:C} to Traditional 401k instead");
+        }
+        
+        // If no Traditional 401k account exists but we want Traditional contributions, put in Roth 401k
+        if (traditionalAmount > 0 && traditional401k == null && roth401k != null)
+        {
+            actualRothContribution += roth401k.Deposit(traditionalAmount, e.Date, TransactionCategory.ContributionPersonal);
+            Console.WriteLine($"\t Note: Traditional 401k not available, contributed ${traditionalAmount:C} to Roth 401k instead");
+        }
+
+        // Company match goes to Traditional 401k by default (most common)
+        double actualCompanyMatch = traditional401k?.Deposit(companyMatchContribution, e.Date, TransactionCategory.ContributionEmployer) ?? 0;
 
         // Calculate taxes
         TaxCalculator taxCalculator = new(person, e.Date.Year);
@@ -204,16 +250,18 @@ public static class LifeEvents
         PrintMonthlySummary(new Dictionary<string, double> { { "Total", totalIncome } }, taxableAccount, totalExpenses, totalWithdrawn);
     }
 
-    private static void OnSpending(object sender, SpendingEventArgs e)
+    internal static void OnSpending(object sender, SpendingEventArgs e)
     {
         var person = (Person)sender;
         double spendingAmount = e.Amount;
+        var currentAge = person.CurrentAge(e.Date);
 
         Console.WriteLine($"Spending: {e.Date}, Amount: {spendingAmount:C} ({e.TransactionCategory})");
 
-        // Handle spending by withdrawing from accounts in a specific order
+        // Age-aware withdrawal strategy
+        var withdrawalOrder = GetOptimalWithdrawalOrder(currentAge);
 
-        foreach (var accountType in (List<AccountType>)([AccountType.Savings, AccountType.RothIRA, AccountType.TraditionalIRA, AccountType.Traditional401k]))
+        foreach (var accountType in withdrawalOrder)
         {
             var accounts = person.Investments.Accounts.Where(acc => acc.Type == accountType && acc.Balance(e.Date) > 0);
             foreach (var account in accounts)
@@ -233,6 +281,53 @@ public static class LifeEvents
         }
     }
 
+    /// <summary>
+    /// Returns the optimal withdrawal order based on current age and tax considerations
+    /// </summary>
+    internal static AccountType[] GetOptimalWithdrawalOrder(int currentAge)
+    {
+        if (currentAge < 59.5)
+        {
+            // Early retirement strategy: Prioritize penalty-free sources
+            return new[]
+            {
+                AccountType.Savings,           // Always penalty-free
+                AccountType.Roth401k,          // Contributions penalty-free after 5 years
+                AccountType.RothIRA,           // Contributions always penalty-free
+                AccountType.HSA,               // Medical expenses penalty-free
+                AccountType.TraditionalIRA,    // 10% penalty but may be necessary
+                AccountType.Traditional401k    // 10% penalty - last resort
+            };
+        }
+        else if (currentAge < 73)
+        {
+            // Post-59.5 to RMD age: Prioritize Traditional accounts to reduce future RMDs
+            return new[]
+            {
+                AccountType.Savings,           // Always penalty-free, use first
+                AccountType.Traditional401k,   // No penalty, reduce future RMDs
+                AccountType.TraditionalIRA,    // No penalty, reduce future RMDs
+                AccountType.HSA,               // Tax-free for medical, preserve if possible
+                AccountType.Roth401k,          // Tax-free growth, preserve for later
+                AccountType.RothIRA            // Tax-free growth, no RMDs, preserve
+            };
+        }
+        else
+        {
+            // RMD age and beyond: More balanced approach
+            // If Traditional accounts are getting low relative to Roth, start using Roth more aggressively
+            return new[]
+            {
+                AccountType.Savings,           // Always use first
+                AccountType.Traditional401k,   // RMDs required anyway, but don't over-deplete
+                AccountType.TraditionalIRA,    // RMDs required anyway, but don't over-deplete
+                AccountType.Roth401k,          // Start using Roth more in later retirement
+                AccountType.HSA,               // Still tax-free for medical
+                AccountType.RothIRA            // Preserve for heirs, but use if needed
+            };
+        }
+    }
+
     private static void PrintMonthlySummary(Dictionary<string, double> totalIncome, InvestmentAccount taxableAccount, double totalExpenses, double totalWithdrawn)
     {
         Console.ForegroundColor = ConsoleColor.Green;
@@ -247,9 +342,9 @@ public static class LifeEvents
     private static double CalculateRMD(Person person, DateOnly date)
     {
         double totalRMD = 0;
-        foreach (Traditional401kAccount account in person.Investments.Accounts.Select(a => a as Traditional401kAccount).Where(w => w is not null))
+        foreach (Traditional401kAccount account in person.Investments.Accounts.OfType<Traditional401kAccount>())
         {
-            totalRMD += account!.RequiredMinimalDistributions(date);
+            totalRMD += account.RequiredMinimalDistributions(date);
         }
 
         Console.WriteLine($"RMD: {totalRMD:C}");

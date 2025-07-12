@@ -1,0 +1,8 @@
+{
+    "dotnet.defaultSolution": "RetirementPlanner.sln",
+    "files.exclude": {
+        "**/bin": true,
+        "**/obj": true
+    },
+    "omnisharp.defaultLaunchSolution": "RetirementPlanner.sln"
+}

@@ -12,6 +12,7 @@ public static class TaxBrackets
     {
         Single = 13850,
         MarriedFilingJointly = 27700,
+        MarriedFilingSeparately = 13851, // Different value to avoid conflict
         HeadOfHousehold = 20800
     }
 
@@ -39,6 +40,18 @@ public static class TaxBrackets
                 new Bracket { LowerBound = 383900, UpperBound = 487450, Rate = 0.32 },
                 new Bracket { LowerBound = 487450, UpperBound = 731200, Rate = 0.35 },
                 new Bracket { LowerBound = 731200, UpperBound = double.MaxValue, Rate = 0.37 }
+            ]
+        },
+        {
+            FileType.MarriedFilingSeparately,
+            [
+                new Bracket { LowerBound = 0, UpperBound = 11600, Rate = 0.10 },
+                new Bracket { LowerBound = 11600, UpperBound = 47150, Rate = 0.12 },
+                new Bracket { LowerBound = 47150, UpperBound = 100525, Rate = 0.22 },
+                new Bracket { LowerBound = 100525, UpperBound = 191950, Rate = 0.24 },
+                new Bracket { LowerBound = 191950, UpperBound = 243725, Rate = 0.32 },
+                new Bracket { LowerBound = 243725, UpperBound = 365600, Rate = 0.35 },
+                new Bracket { LowerBound = 365600, UpperBound = double.MaxValue, Rate = 0.37 }
             ]
         },
         {
@@ -75,4 +88,22 @@ public static class TaxBrackets
         return 0;
     }
 
+    /// <summary>
+    /// Get the marginal tax rate for a given income and filing type
+    /// </summary>
+    public static double GetMarginalTaxRate(FileType fileType, double income)
+    {
+        var brackets = Brackets[fileType];
+        
+        foreach (var bracket in brackets)
+        {
+            if (income >= bracket.LowerBound && income < bracket.UpperBound)
+            {
+                return bracket.Rate;
+            }
+        }
+        
+        // If income exceeds all brackets, return the highest bracket rate
+        return brackets.Last().Rate;
+    }
 }

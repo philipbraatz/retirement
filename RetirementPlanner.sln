@@ -7,7 +7,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RetirementPlanner", "Retire
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RetirementPlanner.Test", "RetirementPlanner.Test\RetirementPlanner.Test.csproj", "{B591D7EE-64FA-4A84-9FB7-0485F39AE5F3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RetirementPlanner.Example", "RetirementPlanner.Example\RetirementPlanner.Example.csproj", "{E9AAEBF7-1705-4E72-8225-AFCCE0BD5336}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RetirementPlanner.Console", "RetirementPlanner.Console\RetirementPlanner.Console.csproj", "{E9AAEBF7-1705-4E72-8225-AFCCE0BD5336}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -24,16 +24,17 @@ public static class TestPersonFactory
                     Title = "Software Engineer",
                     Type = JobType.FullTime,
                     PaymentType = PaymentType.Salaried,
-                    Personal401kContributionPercent = 0.05
+                    RetirementContributionPercent = 0.05
                 }
             ]
         };
 
         person.Investments = new([
             new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(person.BirthDate), 500000),
-                new RothIRAAccount(0.05, "Roth IRA", person, 200000),
-                new InvestmentAccount(0.05, nameof(AccountType.Savings), 100000, AccountType.Savings)
-            ]);
+            new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(person.BirthDate), 0),
+            new RothIRAAccount(0.05, "Roth IRA", person, 200000),
+            new InvestmentAccount(0.05, nameof(AccountType.Savings), 100000, AccountType.Savings)
+        ]);
 
         return person;
     }
@@ -58,16 +59,17 @@ public static class TestPersonFactory
                     Title = "Software Engineer",
                     Type = JobType.FullTime,
                     PaymentType = PaymentType.Salaried,
-                    Personal401kContributionPercent = 0.05
+                    RetirementContributionPercent = 0.05
                 }
             ]
         };
 
         person.Investments = new([
              new Traditional401kAccount(0.05, "Traditional IRA", DateOnly.FromDateTime(person.BirthDate), 600000 ),
-                new RothIRAAccount(0.05, "Roth IRA",person, 250000 ),
-                new InvestmentAccount(0.05, nameof(AccountType.Savings), 50000, AccountType.Savings )
-            ]);
+             new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(person.BirthDate), 0),
+             new RothIRAAccount(0.05, "Roth IRA",person, 250000 ),
+             new InvestmentAccount(0.05, nameof(AccountType.Savings), 50000, AccountType.Savings )
+        ]);
 
         return person;
     }
@@ -91,16 +93,17 @@ public static class TestPersonFactory
                     Title = "Software Engineer",
                     Type = JobType.FullTime,
                     PaymentType = PaymentType.Salaried,
-                    Personal401kContributionPercent = 0.05
+                    RetirementContributionPercent = 0.05
                 }
             ]
         };
 
         person.Investments = new([
                 new Traditional401kAccount(0.05, "Traditional 401k",  DateOnly.FromDateTime(person.BirthDate), 400000 ),
+                new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(person.BirthDate), 0),
                 new RothIRAAccount(0.05, "Roth IRA", person, 300000 ),
                 new InvestmentAccount(0.05, nameof(AccountType.Savings), 75000, AccountType.Savings )
-            ]);
+        ]);
 
         return person;
     }
@@ -118,29 +121,30 @@ public static class TestPersonFactory
             SocialSecurityClaimingAge = 70,
             FileType = FileType.Single,
             SalaryGrowthRate = 0.03,
-            InflationRate = 0.02,
+            InflationRate = 0.024, // 2.4% inflation rate
             GenderMale = true,
             SocialSecurityIncome = 0,
             Jobs = [
                 new(){
                     BonusPay = 1000,
-                    CompanyMatchContributionPercent = 0.26,
+                    CompanyMatchContributionPercent = 0.03, // 3% employer match (more realistic)
                     Salary = 65000,
                     PayFrequency = PayFrequency.BiWeekly,
-                    StartDate = new DateOnly(2021, 6, 1),
+                    StartDate = new DateOnly(2025, 6, 1),
                     Title = "Software Engineer",
                     Type = JobType.FullTime,
                     PaymentType = PaymentType.Salaried,
-                    Personal401kContributionPercent = 0.05
+                    RetirementContributionPercent = 0.15 // 15% total contribution
                 }
             ]
         };
 
         person.Investments = new([
-                new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(person.BirthDate), 75000 ),
-                new RothIRAAccount(0.05, "Roth IRA", person, 200 ),
-                new InvestmentAccount(0.05, nameof(AccountType.Savings), 3000, AccountType.Savings )
-            ]);
+            new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(person.BirthDate), 75000 ),
+            new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(person.BirthDate), 0 ),
+            new RothIRAAccount(0.05, "Roth IRA", person, 500 ),
+            new InvestmentAccount(0.05, nameof(AccountType.Savings), 3000, AccountType.Savings )
+        ]);
 
         return person;
     }

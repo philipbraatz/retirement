@@ -17,18 +17,23 @@ public class RetirementPlanner(Person person, Options? options = null)
     public DateOnly CurrentDate { get; private set; } = (options ?? new()).StartDate;
     public DateOnly LastReportDate { get; private set; } = (options ?? new()).StartDate.AddDays(-1);
 
-    public static event EventHandler<DatedEventArgs> NewYear;
-    public static event EventHandler<PayTaxesEventArgs> PayTaxes;
-    public static event EventHandler<DatedEventArgs> Birthday;
-    public static event EventHandler<DatedEventArgs> OnRetired;
-    public static event EventHandler<DatedEventArgs> OnFullRetirementAge;
-    public static event EventHandler<DatedEventArgs> OnRMDAgeHit;
-    public static event EventHandler<DatedEventArgs> OnSocialSecurityClaimingAgeHit;
-    public static event EventHandler<MoneyShortfallEventArgs> OnMoneyShortfall;
-    public static event EventHandler<DatedEventArgs> OnBroke;
-    public static event EventHandler<JobPayEventArgs> OnJobPay;
-    public static event EventHandler<DatedEventArgs> OnNewMonth;
-    public static event EventHandler<SpendingEventArgs> OnSpending;
+    public static event EventHandler<DatedEventArgs>? NewYear;
+    public static event EventHandler<PayTaxesEventArgs>? PayTaxes;
+    public static event EventHandler<DatedEventArgs>? Birthday;
+    public static event EventHandler<DatedEventArgs>? OnRetired;
+    public static event EventHandler<DatedEventArgs>? OnFullRetirementAge;
+    public static event EventHandler<DatedEventArgs>? OnRMDAgeHit;
+    public static event EventHandler<DatedEventArgs>? OnSocialSecurityClaimingAgeHit;
+    public static event EventHandler<DatedEventArgs>? OnCatchUpContributionsEligible;
+    public static event EventHandler<DatedEventArgs>? OnRuleOf55Eligible;
+    public static event EventHandler<DatedEventArgs>? OnEarlyWithdrawalPenaltyEnds;
+    public static event EventHandler<DatedEventArgs>? OnSocialSecurityEarlyEligible;
+    public static event EventHandler<DatedEventArgs>? OnMedicareEligible;
+    public static event EventHandler<MoneyShortfallEventArgs>? OnMoneyShortfall;
+    public static event EventHandler<DatedEventArgs>? OnBroke;
+    public static event EventHandler<JobPayEventArgs>? OnJobPay;
+    public static event EventHandler<DatedEventArgs>? OnNewMonth;
+    public static event EventHandler<SpendingEventArgs>? OnSpending;
 
     public double CalculateSEPP(DateTime date)
     {
@@ -48,6 +53,11 @@ public class RetirementPlanner(Person person, Options? options = null)
     private bool isRetired;
     private bool claimedSocialSecurity;
     private bool rmdTriggered;
+    private bool catchUpEligible;
+    private bool ruleOf55Eligible;
+    private bool earlyPenaltyEnded;
+    private bool socialSecurityEarlyEligible;
+    private bool medicareEligible;
 
     public async Task RunRetirementSimulation()
     {
@@ -152,6 +162,32 @@ public class RetirementPlanner(Person person, Options? options = null)
                 break;
         }
 
+        // Age-based retirement milestones
+        if (!catchUpEligible && age >= 50)
+        {
+            OnCatchUpContributionsEligible?.Invoke(person, new() { Date = currentDate, Age = age });
+            catchUpEligible = true;
+        }
+        if (!ruleOf55Eligible && age >= 55)
+        {
+            OnRuleOf55Eligible?.Invoke(person, new() { Date = currentDate, Age = age });
+            ruleOf55Eligible = true;
+        }
+        if (!earlyPenaltyEnded && age >= 59.5)
+        {
+            OnEarlyWithdrawalPenaltyEnds?.Invoke(person, new() { Date = currentDate, Age = age });
+            earlyPenaltyEnded = true;
+        }
+        if (!socialSecurityEarlyEligible && age >= 62)
+        {
+            OnSocialSecurityEarlyEligible?.Invoke(person, new() { Date = currentDate, Age = age });
+            socialSecurityEarlyEligible = true;
+        }
+        if (!medicareEligible && age >= 65)
+        {
+            OnMedicareEligible?.Invoke(person, new() { Date = currentDate, Age = age });
+            medicareEligible = true;
+        }
         if (!isRetired && age == person.FullRetirementAge)
         {
             OnFullRetirementAge?.Invoke(person, new() { Date = currentDate, Age = age });
@@ -162,7 +198,7 @@ public class RetirementPlanner(Person person, Options? options = null)
             OnSocialSecurityClaimingAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
             claimedSocialSecurity = true;
         }
-        if (!rmdTriggered && age == 73)
+        if (!rmdTriggered && age >= 73)
         {
             OnRMDAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
             rmdTriggered = true;
