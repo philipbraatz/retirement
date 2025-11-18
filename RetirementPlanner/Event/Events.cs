@@ -102,6 +102,7 @@ public static class LifeEvents
                 AccountType.Roth401k,
                 AccountType.RothIRA,
                 AccountType.HSA,
+                AccountType.Taxable,
                 AccountType.TraditionalIRA,
                 AccountType.Traditional401k
             ];
@@ -113,6 +114,7 @@ public static class LifeEvents
                 AccountType.Traditional401k,
                 AccountType.TraditionalIRA,
                 AccountType.HSA,
+                AccountType.Taxable,
                 AccountType.Roth401k,
                 AccountType.RothIRA
             ];
@@ -123,6 +125,7 @@ public static class LifeEvents
                 AccountType.Savings,
                 AccountType.Traditional401k,
                 AccountType.TraditionalIRA,
+                AccountType.Taxable,
                 AccountType.Roth401k,
                 AccountType.HSA,
                 AccountType.RothIRA

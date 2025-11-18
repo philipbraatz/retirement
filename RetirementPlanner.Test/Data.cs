@@ -15,8 +15,9 @@ public static class TestPersonFactory
         var traditional401k = new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(new DateTime(1985, 6, 15)), 500000);
         var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 200000);
         var taxableAccount = new InvestmentAccount(0.05, "Taxable Account", 100000, AccountType.Savings);
+        var pocketCash = new InvestmentAccount(0.0, "Pocket Cash", 0, AccountType.Savings);
 
-        Person person = new(traditional401k, rothIRA, taxableAccount)
+        Person person = new(traditional401k, rothIRA, taxableAccount, pocketCash)
         {
             BirthDate = new DateTime(1985, 6, 15), // Age 39
             FullRetirementAge = 67,
@@ -24,6 +25,13 @@ public static class TestPersonFactory
             EssentialExpenses = 40000,
             DiscretionarySpending = 10000,
             SocialSecurityClaimingAge = 62,
+            PartTimeAge = 40, // Early retirement plan
+            
+            // Emergency Fund Configuration for Early Retiree
+            AutoCalculateEmergencyFunds = true,
+            PreRetirementEmergencyMonths = 6,
+            EarlyRetirementEmergencyMonths = 24, // 2 years for early retirement
+            PostRetirementEmergencyMonths = 12
         };
 
         // Add a job to generate income
@@ -54,8 +62,9 @@ public static class TestPersonFactory
         var traditionalIRA = new InvestmentAccount(0.05, "Traditional IRA", 600000, AccountType.TraditionalIRA);
         var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 250000);
         var taxableAccount = new InvestmentAccount(0.05, "Taxable Account", 50000, AccountType.Savings);
+        var pocketCash = new InvestmentAccount(0.0, "Pocket Cash", 0, AccountType.Savings);
 
-        Person person = new(traditionalIRA, rothIRA, taxableAccount)
+        Person person = new(traditionalIRA, rothIRA, taxableAccount, pocketCash)
         {
             BirthDate = new DateTime(1960, 3, 20), // Age 64
             FullRetirementAge = 67,
@@ -63,6 +72,12 @@ public static class TestPersonFactory
             EssentialExpenses = 50000,
             DiscretionarySpending = 15000,
             SocialSecurityClaimingAge = 67,
+            
+            // Emergency Fund Configuration for Normal Retiree
+            AutoCalculateEmergencyFunds = true,
+            PreRetirementEmergencyMonths = 6,
+            EarlyRetirementEmergencyMonths = 18,
+            PostRetirementEmergencyMonths = 12
         };
 
         // Add a job with lower income for someone approaching retirement
@@ -98,7 +113,13 @@ public static class TestPersonFactory
             EssentialExpenses = 45000,
             DiscretionarySpending = 20000,
             SocialSecurityClaimingAge = 70,
-            SocialSecurityIncome = 3000 // Monthly SS income
+            SocialSecurityIncome = 3000, // Monthly SS income
+            
+            // Emergency Fund Configuration for Late Retiree
+            AutoCalculateEmergencyFunds = true,
+            PreRetirementEmergencyMonths = 6,
+            EarlyRetirementEmergencyMonths = 18,
+            PostRetirementEmergencyMonths = 12
         };
 
         // Create accounts and add deposits with proper dates
@@ -110,6 +131,8 @@ public static class TestPersonFactory
         
         var taxableAccount = new InvestmentAccount(0.05, "Taxable Account", 0, AccountType.Savings);
         taxableAccount.Deposit(75000, new DateOnly(2023, 1, 1), TransactionCategory.InternalTransfer);
+
+        var pocketCash = new InvestmentAccount(0.0, "Pocket Cash", 0, AccountType.Savings);
 
         // Set up investment manager with the accounts
         person.Investments = new InvestmentManager([traditional401k, rothIRA, taxableAccount]);
@@ -126,24 +149,32 @@ public static class TestPersonFactory
             BirthDate = new DateTime(1998, 1, 14),
         };
 
-        var traditional401k = new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(new DateTime(1998, 1, 14)), 400000);
-        var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 300000);
-        var taxableAccount = new InvestmentAccount(0.05, "Taxable Account", 75000, AccountType.Savings);
+        var traditional401k = new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(new DateTime(1998, 1, 14)), 75000);
+        var roth401k = new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(new DateTime(1998, 1, 14)), 0); // Start with 0 to see growth
+        var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 500);
+        var savingsAccount = new InvestmentAccount(0.05, "Savings", 8000, AccountType.Savings); // Increased from 3000 to 8000
+        var pocketCash = new InvestmentAccount(0.0, "Pocket Cash", 0, AccountType.Savings); // Added Pocket Cash account
 
-        Person person = new(traditional401k, rothIRA, taxableAccount)
+        Person person = new(traditional401k, roth401k, rothIRA, savingsAccount, pocketCash)
         {
             BirthDate = new DateTime(1998, 1, 14),
             FullRetirementAge = 67,
             PartTimeAge = 45,
             PartTimeEndAge = 45,
-            EssentialExpenses = 400 * 12,
-            DiscretionarySpending = 500 * 12,
+            EssentialExpenses = 400 * 12, // $4,800/year
+            DiscretionarySpending = 500 * 12, // $6,000/year  
             SocialSecurityClaimingAge = 70,
             FileType = FileType.Single,
             SalaryGrowthRate = 0.03,
             InflationRate = 0.02,
             GenderMale = true,
-            SocialSecurityIncome = 0
+            SocialSecurityIncome = 0,
+            
+            // Emergency Fund Configuration - Reasonable for young working professional
+            AutoCalculateEmergencyFunds = true,
+            PreRetirementEmergencyMonths = 6, // 6 months = $5,400 (reasonable while working)
+            EarlyRetirementEmergencyMonths = 18, // 18 months for actual early retirement (not planning)
+            PostRetirementEmergencyMonths = 12
         };
 
         // Add current job
@@ -152,12 +183,12 @@ public static class TestPersonFactory
             Type = JobType.FullTime,
             PaymentType = PaymentType.Salaried,
             Salary = 63000,
-            RetirementContributionPercent = 0.26,
+            RetirementContributionPercent = 0.15, // More reasonable 15% instead of 26%
             CompanyMatchContributionPercent = 0.05,
             PayRaisePercent = 0.03,
             Title = "Software Engineer",
             StartDate = new DateOnly(2025, 6, 1),
-            PayFrequency = PayFrequency.BiWeekly
+            PayFrequency = PayFrequency.Monthly // Changed to monthly for easier tracking
         });
 
         return person;

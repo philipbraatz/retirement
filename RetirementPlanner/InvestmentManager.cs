@@ -18,19 +18,30 @@ public class InvestmentManager(IEnumerable<InvestmentAccount> accounts)
         double fiveYearRequiredBalance = annualExpenses * 5;
         double availableBalance = traditionalAccounts.Sum(a => a.Balance(date)) + rothAccount.Balance(date);
 
+        double totalConverted = 0;
         foreach (var account in traditionalAccounts)
         {
-            if (conversionLimit <= 0) return;
+            if (conversionLimit <= 0) break;
 
             // Ensure 5-Year Safety Net Before Converting
             double maxSafeConversion = availableBalance - fiveYearRequiredBalance;
-            double conversionAmount = MathExtensions.Min(account.Balance(date), conversionLimit, maxSafeConversion);
+            double conversionAmount = Math.Min(Math.Min(account.Balance(date), conversionLimit), maxSafeConversion);
 
-            account.Withdraw(conversionAmount, date, TransactionCategory.InternalTransfer);
-            rothAccount.Deposit(conversionAmount, date, TransactionCategory.InternalTransfer);
-            conversionLimit -= conversionAmount;
+            if (conversionAmount > 0)
+            {
+                account.Withdraw(conversionAmount, date, TransactionCategory.InternalTransfer);
+                rothAccount.Deposit(conversionAmount, date, TransactionCategory.InternalTransfer);
+                conversionLimit -= conversionAmount;
+                totalConverted += conversionAmount;
+            }
         }
-        Console.WriteLine();
+        
+        if (totalConverted > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            Console.WriteLine($"🔄 Roth Conversion: {totalConverted:C} (Traditional → Roth IRA for future tax-free growth)");
+            Console.ResetColor();
+        }
     }
 
     public void ApplyMonthlyGrowth(DateOnly date) => Accounts.ForEach(a => a.ApplyMonthlyGrowth(date));

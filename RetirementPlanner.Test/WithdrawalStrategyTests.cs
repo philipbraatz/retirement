@@ -95,12 +95,11 @@ namespace RetirementPlanner.Test
             var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 25000); // High balance
             var hsaAccount = new HSAAccount(0.05, "HSA", 10000);
 
-            Person person = new(traditional401k, traditionalIRA, roth401k, rothIRA, savingsAccount, hsaAccount)
-            {
-                BirthDate = new DateTime(1950, 1, 1), // Age 74 at test date
-                EssentialExpenses = 5000, // High expenses to force account depletion
-                DiscretionarySpending = 0,
-            };
+            var person = new Person();
+            person.BirthDate = new DateTime(1950, 1, 1); // Age 74 at test date
+            person.EssentialExpenses = 5000; // High expenses to force account depletion
+            person.DiscretionarySpending = 0;
+            person.Investments = new InvestmentManager([traditional401k, traditionalIRA, roth401k, rothIRA, savingsAccount, hsaAccount]);
 
             var testDate = new DateOnly(2024, 6, 1);
             double totalWithdrawal = 2000; // Amount that will require depleting Traditional and using Roth
@@ -136,6 +135,43 @@ namespace RetirementPlanner.Test
             
             // Verify spending was fully covered
             Assert.True(remaining <= 0, $"Spending should be fully covered, but {remaining:C} remains");
+        }
+
+        [Fact]
+        public void TotalWithdrawals_Should_Approximate_TotalExpenses_Over_Time()
+        {
+            // Arrange
+            var person = TestPersonFactory.CreateNormalRetiree();
+            var options = new RetirementPlanner.Options
+            {
+                StartDate = new DateOnly(2024, 1, 1),
+                EndDate = new DateOnly(2034, 1, 1)
+            };
+            var simulation = new RetirementPlanner(person, options);
+
+            // Act
+            simulation.RunRetirementSimulation().Wait(); // Run simulation synchronously for testing
+
+            // Collect data
+            double totalWithdrawals = 0;
+            foreach (var account in person.Investments.Accounts)
+            {
+                totalWithdrawals += account.WithdrawalHistory.Sum(w => w.Amount);
+            }
+
+            double totalExpenses = 0;
+            var currentDate = options.StartDate;
+            while (currentDate < options.EndDate)
+            {
+                totalExpenses += (person.EssentialExpenses + person.DiscretionarySpending) / 12;
+                currentDate = currentDate.AddMonths(1);
+            }
+
+            // Assert
+            // Check if total withdrawals are within a reasonable range of total expenses
+            // Allow for some tolerance due to timing of withdrawals and expenses
+            double tolerance = 0.10; // 10% tolerance
+            Assert.InRange(totalWithdrawals, totalExpenses * (1 - tolerance), totalExpenses * (1 + tolerance));
         }
     }
 }

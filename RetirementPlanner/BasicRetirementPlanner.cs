@@ -1,4 +1,4 @@
-using RetirementPlanner.Event;
+﻿using RetirementPlanner.Event;
 using static RetirementPlanner.RetirementPlanner;
 
 namespace RetirementPlanner;
@@ -11,11 +11,15 @@ public class RetirementPlanner(Person person, Options? options = null)
         public DateOnly EndDate { get; set; } = DateOnly.FromDateTime(DateTime.Now.AddYears(110));
         public TimeSpan ReportGranularity { get; set; } = TimeSpan.FromDays(30);
         public TimeSpan TimeStep { get; set; } = TimeSpan.FromDays(1);
+        public bool AutoSubscribeLifeEvents { get; set; } = true;
     }
 
     private readonly Options _Options = options ?? new();
     public DateOnly CurrentDate { get; private set; } = (options ?? new()).StartDate;
     public DateOnly LastReportDate { get; private set; } = (options ?? new()).StartDate.AddDays(-1);
+
+    // Collection of smart milestone events that know when to trigger themselves
+    private readonly List<MilestoneEvent> _milestones = CreateMilestoneEvents();
 
     public static event EventHandler<DatedEventArgs>? NewYear;
     public static event EventHandler<PayTaxesEventArgs>? PayTaxes;
@@ -35,6 +39,28 @@ public class RetirementPlanner(Person person, Options? options = null)
     public static event EventHandler<DatedEventArgs>? OnNewMonth;
     public static event EventHandler<SpendingEventArgs>? OnSpending;
 
+    // Reset all static event handlers to prevent duplicate subscriptions across runs
+    public static void ResetAllEventHandlers()
+    {
+        NewYear = null;
+        PayTaxes = null;
+        Birthday = null;
+        OnRetired = null;
+        OnFullRetirementAge = null;
+        OnRMDAgeHit = null;
+        OnSocialSecurityClaimingAgeHit = null;
+        OnCatchUpContributionsEligible = null;
+        OnRuleOf55Eligible = null;
+        OnEarlyWithdrawalPenaltyEnds = null;
+        OnSocialSecurityEarlyEligible = null;
+        OnMedicareEligible = null;
+        OnMoneyShortfall = null;
+        OnBroke = null;
+        OnJobPay = null;
+        OnNewMonth = null;
+        OnSpending = null;
+    }
+
     public double CalculateSEPP(DateTime date)
     {
         //double lifeExpectancy = LifeExpectancyTable.GetLifeExpectancy(person.CurrentAge(date), person.GenderMale);
@@ -50,19 +76,14 @@ public class RetirementPlanner(Person person, Options? options = null)
         return person.SocialSecurityIncome * 0.85; // 85% taxable
     }
 
-    private bool isRetired;
-    private bool claimedSocialSecurity;
-    private bool rmdTriggered;
-    private bool catchUpEligible;
-    private bool ruleOf55Eligible;
-    private bool earlyPenaltyEnded;
-    private bool socialSecurityEarlyEligible;
-    private bool medicareEligible;
-
     public async Task RunRetirementSimulation()
     {
         if (_Options.ReportGranularity < TimeSpan.FromDays(1))
             throw new ArgumentException("Granularity must be at least one day");
+
+        // Auto-subscribe to default LifeEvents if requested
+        if (_Options.AutoSubscribeLifeEvents)
+            LifeEvents.Subscribe(this);
 
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.WriteLine($"Started simulation for {person.BirthDate} with {person.Investments.Accounts.Count} accounts");
@@ -116,25 +137,86 @@ public class RetirementPlanner(Person person, Options? options = null)
     {
         DateOnly lastReported = currentDate;
 
-        // Collect data for each account
-        foreach (var account in person.Investments.Accounts)
-        {
-            double deposits = account.DepositHistory.Where(d => d.Date.Year == currentDate.Year && d.Date.Month == currentDate.Month).Sum(d => d.Amount);
-            double withdrawals = account.WithdrawalHistory.Where(w => w.Date.Year == currentDate.Year && w.Date.Month == currentDate.Month).Sum(w => w.Amount);
-            double balance = account.Balance(currentDate);
-
-            history.Add(new()
+        // Collect data for each account using LINQ Select and AddRange
+        var accountSummaries = person.Investments.Accounts
+            .Select(account =>
             {
-                Date = currentDate,
-                AccountName = account.Name,
-                Deposits = deposits,
-                Withdrawals = withdrawals,
-                TotalBalance = balance
+                Func<(double Amount, DateOnly Date, TransactionCategory Category), bool> CurrentMonth = d => d.Date.Year == currentDate.Year && d.Date.Month == currentDate.Month;
+                return new MonthlyAccountSummary
+                {
+                    Date = currentDate,
+                    AccountName = account.Name,
+                    Deposits = account.DepositHistory
+                                    .Where(CurrentMonth)
+                                    .Sum(d => d.Amount),
+                    Withdrawals = account.WithdrawalHistory
+                                    .Where(CurrentMonth)
+                                    .Sum(w => w.Amount),
+                    TotalBalance = account.Balance(currentDate)
+                };
             });
-        }
 
-        //PrintColoredLine($"Age {person.CurrentAge(currentDate)}\t", person.Investments.Accounts.Select(a => (a.Balance(currentDate), $"{a.Name}={a.Balance(currentDate):C}")).ToArray(), (person.EssentialExpenses + person.DiscretionarySpending) / 12);
+        history.AddRange(accountSummaries);
+
+        PrintColoredLine($"Age {person.CurrentAge(currentDate)}\t", person.Investments.Accounts.Select(a => (a.Balance(currentDate), $"{a.Name}={a.Balance(currentDate):C}")).ToArray(), (person.EssentialExpenses + person.DiscretionarySpending) / 12);
         return lastReported;
+    }
+
+    /// <summary>
+    /// Creates the collection of smart milestone events with their trigger conditions
+    /// Each event knows when it should fire based on its predicate
+    /// </summary>
+    private static List<MilestoneEvent> CreateMilestoneEvents()
+    {
+        return
+        [
+            new(
+                "Catch-up Contributions Eligible",
+                (p, age) => age >= 50,
+                OnCatchUpContributionsEligible
+            ),
+            new(
+                "Rule of 55 Eligible",
+                (p, age) => age >= 55,
+                OnRuleOf55Eligible
+            ),
+            new(
+                "Early Withdrawal Penalty Ends",
+                (p, age) => age >= 59.5,
+                OnEarlyWithdrawalPenaltyEnds
+            ),
+            new(
+                "Social Security Early Eligible",
+                (p, age) => age >= 62,
+                OnSocialSecurityEarlyEligible
+            ),
+            new(
+                "Medicare Eligible",
+                (p, age) => age >= 65,
+                OnMedicareEligible
+            ),
+            new(
+                "Full Retirement Age",
+                (p, age) => age == p.FullRetirementAge,
+                OnFullRetirementAge
+            ),
+            new(
+                "Social Security Claiming Age",
+                (p, age) => age == p.SocialSecurityClaimingAge,
+                OnSocialSecurityClaimingAgeHit
+            ),
+            new(
+                "RMD Age Hit",
+                (p, age) => age >= 73,
+                OnRMDAgeHit
+            ),
+            new(
+                "Early Retirement",
+                (p, age) => (p.RetirementAge > 0 && age == p.RetirementAge) || (p.RetirementAge == 0 && p.PartTimeAge > 0 && age == p.PartTimeAge),
+                OnRetired,
+                (date, age) => Console.WriteLine($"🎯 Early Retirement at age {age}!")
+            )
+        ];
     }
 
     public double Simulate(DateOnly currentDate)
@@ -146,14 +228,18 @@ public class RetirementPlanner(Person person, Options? options = null)
         {
             case { Month: 1, Day: 1 }:
                 NewYear?.Invoke(person, new() { Date = currentDate });
+                // Also process monthly events on the 1st of January
+                OnNewMonth?.Invoke(person, new() { Date = currentDate });
                 break;
             case { Month: 12, Day: 1 }:
                 yearlyTaxesOwed = ApplyYearlyTaxes();
                 PayTaxes?.Invoke(person, new() { Date = currentDate, TaxesOwed = yearlyTaxesOwed });
+                // Also process monthly events on the 1st of December
+                OnNewMonth?.Invoke(person, new() { Date = currentDate });
                 break;
 
             case { Day: 1 }:
-                // Currently handles: Investment growth, spending monthly expenses
+                // Handles: Investment growth and spending monthly expenses
                 OnNewMonth?.Invoke(person, new() { Date = currentDate });
                 break;
 
@@ -162,51 +248,16 @@ public class RetirementPlanner(Person person, Options? options = null)
                 break;
         }
 
-        // Age-based retirement milestones
-        if (!catchUpEligible && age >= 50)
+        // Check and trigger smart milestone events - they know when to fire
+        foreach (var milestone in _milestones)
         {
-            OnCatchUpContributionsEligible?.Invoke(person, new() { Date = currentDate, Age = age });
-            catchUpEligible = true;
-        }
-        if (!ruleOf55Eligible && age >= 55)
-        {
-            OnRuleOf55Eligible?.Invoke(person, new() { Date = currentDate, Age = age });
-            ruleOf55Eligible = true;
-        }
-        if (!earlyPenaltyEnded && age >= 59.5)
-        {
-            OnEarlyWithdrawalPenaltyEnds?.Invoke(person, new() { Date = currentDate, Age = age });
-            earlyPenaltyEnded = true;
-        }
-        if (!socialSecurityEarlyEligible && age >= 62)
-        {
-            OnSocialSecurityEarlyEligible?.Invoke(person, new() { Date = currentDate, Age = age });
-            socialSecurityEarlyEligible = true;
-        }
-        if (!medicareEligible && age >= 65)
-        {
-            OnMedicareEligible?.Invoke(person, new() { Date = currentDate, Age = age });
-            medicareEligible = true;
-        }
-        if (!isRetired && age == person.FullRetirementAge)
-        {
-            OnFullRetirementAge?.Invoke(person, new() { Date = currentDate, Age = age });
-            isRetired = true;
-        }
-        if (!claimedSocialSecurity && age == person.SocialSecurityClaimingAge)
-        {
-            OnSocialSecurityClaimingAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
-            claimedSocialSecurity = true;
-        }
-        if (!rmdTriggered && age >= 73)
-        {
-            OnRMDAgeHit?.Invoke(person, new() { Date = currentDate, Age = age });
-            rmdTriggered = true;
+            milestone.CheckAndTrigger(person, age, currentDate, person);
         }
 
-        // Social Security, RMD withdrawals are handled as special kind of jobs (More like income sources)
-        foreach (var j in person.Jobs.Where(j => j.IsPayday(currentDate) &&
-                (person.PartTimeEndAge > age || j.Type == JobType.Unemployed)
+        bool isRetired = person.RetirementAge > 0 ? age >= person.RetirementAge : age >= person.PartTimeEndAge;
+
+        // Social Security, RMD withdrawals handled as special jobs
+        foreach (var j in person.Jobs.Where(j => j.IsPayday(currentDate) && !isRetired
             ).ToList())
         {
             OnJobPay?.Invoke(person, new()
@@ -230,7 +281,7 @@ public class RetirementPlanner(Person person, Options? options = null)
         // Sum taxable withdrawals from tax-deferred accounts (401k, Traditional IRA)
         totalTaxableIncome += person.Investments.Accounts.Select(a => a as Traditional401kAccount)
             .Sum(s => s?.WithdrawalHistory.Where(w => w.Date.Year == DateTime.Now.Year)
-                .Sum(s => s.Amount) ?? 0);
+            .Select(w => w.Amount).Sum() ?? 0);
 
         return TaxBrackets.CalculateTaxes(person.FileType, Math.Max(0, totalTaxableIncome));
     }
@@ -245,5 +296,18 @@ public class RetirementPlanner(Person person, Options? options = null)
             Console.Write($"{moneyValue.Item2}\t");
         }
         Console.ResetColor();
+    }
+
+    /// <summary>
+    /// Processes age-based retirement milestones by checking each smart milestone event
+    /// The events themselves know when to trigger based on their predicates
+    /// </summary>
+    private void ProcessAgeMilestones(DateOnly currentDate, int age)
+    {
+        // Each milestone checks itself and triggers if conditions are met
+        foreach (var milestone in _milestones)
+        {
+            milestone.CheckAndTrigger(person, age, currentDate, person);
+        }
     }
 }

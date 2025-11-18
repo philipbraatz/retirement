@@ -30,72 +30,96 @@ public class InvestmentAccount(double annualGrowthRate, string name, AccountType
     public List<(double Amount, DateOnly Date, TransactionCategory Category)> DepositHistory { get; } = [];
     public List<(double Amount, DateOnly Date, TransactionCategory Category)> WithdrawalHistory { get; } = [];
 
-    public InvestmentAccount(double annualGrowthRate, string name, double startingBalance, AccountType type) : this(annualGrowthRate, name, type)
+    // Track which dates have already had growth applied to prevent duplicates on the same day
+    private readonly HashSet<DateOnly> _growthAppliedDates = [];
+
+    public InvestmentAccount(double annualGrowthRate, string name, double startingBalance, AccountType type, DateOnly? creationDate = null) : this(annualGrowthRate, name, type)
     {
-            var creationDate = DateOnly.FromDateTime(DateTime.MinValue);
-            YearlyStartingBalances[creationDate.Year] = startingBalance;
-        }
+        // If a creation date is not provided, assume the balance existed "since the beginning"
+        // so that queries for any historical date include withdrawals/deposits correctly.
+        int startYear = creationDate?.Year ?? 1;
+        YearlyStartingBalances[startYear] = startingBalance;
     }
 
     public double Balance(DateOnly date)
     {
-        int year = date.Year;
+        int targetYear = date.Year;
 
-        // Get the desired year or the latest year before the desired year
-        if (!YearlyStartingBalances.TryGetValue(date.Year, out var startingBalance))
+        if (!YearlyStartingBalances.Any())
+            return 0;
+
+        // Try to get a starting balance for the requested year
+        if (!YearlyStartingBalances.TryGetValue(targetYear, out double startingBalance))
         {
-            if (!YearlyStartingBalances.Any())
+            // Find the latest starting balance not after the target year
+            var candidate = YearlyStartingBalances
+            .Where(y => y.Key <= targetYear)
+            .OrderByDescending(y => y.Key)
+            .FirstOrDefault();
+
+            if (!candidate.Equals(default(KeyValuePair<int, double>)))
             {
-                // No starting balances recorded, start with 0
-                startingBalance = 0;
-                year = date.Year;
+                targetYear = candidate.Key;
+                startingBalance = candidate.Value;
             }
             else
             {
-                var availableYears = YearlyStartingBalances.Where(y => y.Key <= date.Year).OrderByDescending(o => o.Key);
-                if (availableYears.Any())
-                {
-                    var yearBalance = availableYears.First();
-                    year = yearBalance.Key;
-                    startingBalance = yearBalance.Value;
-                }
-                else
-                {
-                    // The requested date is before any recorded starting balance
-                    // This means the account didn't exist or had no balance at that time
-                    return 0;
-                }
+                // Requested date is earlier than any recorded starting balance.
+                // Treat the earliest recorded starting balance as already existing.
+                var earliest = YearlyStartingBalances.OrderBy(y => y.Key).First();
+                targetYear = earliest.Key;
+                startingBalance = earliest.Value;
             }
         }
 
-        double deposits = DepositHistory.Where(d => d.Date.Year >= year && d.Date <= date).Sum(d => d.Amount);
-        double withdrawals = WithdrawalHistory.Where(w => w.Date.Year >= year && w.Date <= date).Sum(w => w.Amount);
+        double deposits = DepositHistory.Where(d => d.Date.Year >= targetYear && d.Date <= date).Sum(d => d.Amount);
+        double withdrawals = WithdrawalHistory.Where(w => w.Date.Year >= targetYear && w.Date <= date).Sum(w => w.Amount);
 
         return startingBalance + deposits - withdrawals;
     }
 
     private double CalcStartOfYearBalance(int year)
     {
-        var previousYear = YearlyStartingBalances.Where(m => m.Key < year).Max(k => k.Key);
-        double previousYearBalance = YearlyStartingBalances[previousYear];
-        double previousYearDeposits = DepositHistory.Where(d => d.Date.Year >= previousYear && year > d.Date.Year).Sum(d => d.Amount);
-        double previousYearWithdrawals = WithdrawalHistory.Where(w => w.Date.Year >= previousYear && year > w.Date.Year).Sum(w => w.Amount);
+        // Find the most recent year before the target year that has a starting balance
+        var previousYearEntries = YearlyStartingBalances.Where(m => m.Key < year);
+        if (!previousYearEntries.Any())
+        {
+            return 0; // No previous years, start with0
+        }
 
-        return previousYearBalance + previousYearDeposits - previousYearWithdrawals;
+        var previousYear = previousYearEntries.Max(k => k.Key);
+
+        // Calculate the end-of-year balance for the previous year
+        // This becomes the starting balance for the current year
+        double endOfPreviousYearBalance = Balance(new DateOnly(previousYear, 12, 31));
+
+        return endOfPreviousYearBalance;
     }
 
     public void ApplyMonthlyGrowth(DateOnly date)
     {
+        // Prevent applying growth multiple times for the same day
+        if (_growthAppliedDates.Contains(date))
+        {
+            return;
+        }
+
         double currentBalance = Balance(date);
-        if (currentBalance <= 0) return; // No growth on zero balance
-        
+        if (currentBalance <= 0)
+        {
+            // Mark as processed even if no growth to apply
+            _growthAppliedDates.Add(date);
+            return;
+        }
+
         double monthlyRate = Math.Pow(1 + AnnualGrowthRate, 1.0 / 12) - 1;
         double growthAmount = currentBalance * monthlyRate;
-        
+
         if (growthAmount > 0)
         {
             Deposit(growthAmount, date, TransactionCategory.Intrest);
-            Console.WriteLine($"   => {growthAmount:C} Into {Name} [ {Balance(date):C} ]");
+            // Mark this day as having growth applied
+            _growthAppliedDates.Add(date);
         }
     }
 
@@ -108,6 +132,10 @@ public class InvestmentAccount(double annualGrowthRate, string name, AccountType
 
         // Withdraw from balance
         WithdrawalHistory.Add((amountWithdrawn, date, category));
+
+        // Console output: -$ {category} from {account type}
+        Console.WriteLine($"-${amountWithdrawn:C} {category} from {Type}");
+
         return amountWithdrawn;
     }
 
@@ -116,37 +144,35 @@ public class InvestmentAccount(double annualGrowthRate, string name, AccountType
         if (amount <= 0) return 0;
 
         if (!YearlyStartingBalances.Any())
-        {   // Ensure a balance exists.
+        { // Ensure a balance exists.
             YearlyStartingBalances.Add(date.Year, 0);
         }
 
         if (!YearlyStartingBalances.ContainsKey(date.Year))
-        {   // Set this years balance to the previously found years balance.
+        { // Set this years balance to the previously found years balance.
             YearlyStartingBalances[date.Year] = CalcStartOfYearBalance(date.Year);
         }
 
         DepositHistory.Add((amount, date, category));
 
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.Write($"\t=> {amount:C} Into {Name} ");
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Write($"[ {Balance(date):C0} ]");
-        Console.ResetColor();
+        // Console output: +$ {category} to {account type}
+        Console.WriteLine($"+${amount:C} {category} to {Type}");
+
         return amount;
     }
 }
 
-public class RothIRAAccount(double annualGrowthRate, string name, Person person, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.RothIRA)
+public class RothIRAAccount(double annualGrowthRate, string name, Person person, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.RothIRA, creationDate)
 {
     public Person Owner { get; } = person;
 
     public override double Withdraw(double amount, DateOnly date, TransactionCategory category)
     {
         var startingBalance = YearlyStartingBalances.TryGetValue(date.Year, out var balance)
-            ? balance
-            : YearlyStartingBalances.TryGetValue(date.Year - 1, out balance)
-                ? balance
-                : Balance(date);
+        ? balance
+        : YearlyStartingBalances.TryGetValue(date.Year - 1, out balance)
+        ? balance
+        : Balance(date);
 
         var rothLimit = startingBalance * 0.25;
         var penalty = 0.0;
@@ -154,17 +180,17 @@ public class RothIRAAccount(double annualGrowthRate, string name, Person person,
 
         // Check for penalty-free amount
         double penaltyFreeBalance = DepositHistory
-            .Where(c => date >= c.Date.AddYears(5)) // Only conversions older than 5 years are penalty-free
-            .Sum(c => c.Amount);
+        .Where(c => date >= c.Date.AddYears(5)) // Only conversions older than5 years are penalty-free
+        .Sum(c => c.Amount);
 
-        // If withdrawal exceeds penalty-free balance, apply 10% penalty
+        // If withdrawal exceeds penalty-free balance, apply10% penalty
         if (amountWithdrawn > penaltyFreeBalance)
         {
             double taxableAmount = amountWithdrawn - penaltyFreeBalance;
             penalty = taxableAmount * 0.10;
 
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\t Roth IRA Penalty Applied: {penalty:C} on {taxableAmount:C} of withdrawal");
+            Console.WriteLine($"💸 FEE: Roth IRA Early Withdrawal Penalty {penalty:C} → IRS");
             Console.ResetColor();
 
             if (penalty >= Balance(date))
@@ -180,11 +206,8 @@ public class RothIRAAccount(double annualGrowthRate, string name, Person person,
     public override double Deposit(double amount, DateOnly date, TransactionCategory category)
     {
         double personalContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
-            .Sum(d => d.Amount);
-
-        // Use TaxCalculator to determine taxable income
-        TaxCalculator taxCalculator = new(Owner, date.Year);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
+        .Sum(d => d.Amount);
 
         // Apply Roth IRA contribution limits based on taxable income
         double limit = LimitRothIRA(personalContributions, Owner.TaxableIncome, Owner.CurrentAge(date));
@@ -196,7 +219,7 @@ public class RothIRAAccount(double annualGrowthRate, string name, Person person,
 
     public static double LimitRothIRA(double currentContribution, double income, int age)
     {
-        double limit = (age >= 50) ? 8000 : 7000; // Catch-up at age 50
+        double limit = (age >= 50) ? 8000 : 7000; // Catch-up at age50
         if (income > 161000) return 0; // Above income limit, no Roth contributions
         if (income > 146000) return Math.Max(0, limit - ((income - 146000) / (161000 - 146000) * limit)); // Phase-out
 
@@ -204,7 +227,7 @@ public class RothIRAAccount(double annualGrowthRate, string name, Person person,
     }
 }
 
-public class Traditional401kAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Traditional401k)
+public class Traditional401kAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Traditional401k, creationDate)
 {
     private readonly DateOnly birthdate = birthdate;
 
@@ -217,12 +240,12 @@ public class Traditional401kAccount(double annualGrowthRate, string name, DateOn
         }
 
         double personalContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
-            .Sum(d => d.Amount);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
+        .Sum(d => d.Amount);
 
         double employerContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionEmployer)
-            .Sum(d => d.Amount);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionEmployer)
+        .Sum(d => d.Amount);
 
         double totalContributions = personalContributions + employerContributions;
 
@@ -236,27 +259,29 @@ public class Traditional401kAccount(double annualGrowthRate, string name, DateOn
             limit = ContributionLimits.Limit401kEmployer(personalContributions, employerContributions, date.Year - birthdate.Year);
         }
 
-        double amountToDeposit = amount + totalContributions > limit ? limit : amount;
-        amountToDeposit = base.Deposit(amountToDeposit, date, category);
-        return amountToDeposit;
+        // Only allow the remaining amount up to the limit for this year/category
+        double remaining = Math.Max(0, limit - (category == TransactionCategory.ContributionPersonal ? personalContributions : totalContributions));
+        double amountToDeposit = Math.Min(amount, remaining);
+        double actualDeposited = base.Deposit(amountToDeposit, date, category);
+        return actualDeposited;
     }
 
     public override double Withdraw(double amount, DateOnly date, TransactionCategory category)
     {
         var amountWithdrawn = Math.Min(amount, Balance(date));
         double age = date.Year - birthdate.Year + (date.Month - birthdate.Month) / 12.0;
-        
+
         // Calculate early withdrawal penalty using the new calculator
         var penalty = EarlyWithdrawalPenaltyCalculator.CalculatePenalty(
-            Type, 
-            amountWithdrawn, 
-            age,
-            withdrawalReason: WithdrawalReason.GeneralDistribution);
+        Type,
+        amountWithdrawn,
+        age,
+        withdrawalReason: WithdrawalReason.GeneralDistribution);
 
         if (penalty > 0)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\t 401(k) Early Withdrawal Penalty Applied: {penalty:C}");
+            Console.WriteLine($"💸 FEE:401(k) Early Withdrawal Penalty {penalty:C} → IRS");
             Console.ResetColor();
 
             base.Withdraw(penalty, date, TransactionCategory.EarlyWithdrawalPenality);
@@ -269,12 +294,12 @@ public class Traditional401kAccount(double annualGrowthRate, string name, DateOn
     {
         int currentAge = date.Year - birthdate.Year;
         double priorYearBalance = Balance(new DateOnly(date.Year - 1, 12, 31));
-        
+
         return RMDCalculator.CalculateRMD(this, currentAge, priorYearBalance, isStillWorking);
     }
 }
 
-public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Roth401k)
+public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birthdate, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Roth401k, creationDate)
 {
     private readonly DateOnly birthdate = birthdate;
     private double contributionBasis = startingBalance; // Track contributions vs earnings
@@ -282,12 +307,12 @@ public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birt
     public override double Deposit(double amount, DateOnly date, TransactionCategory category)
     {
         double personalContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
-            .Sum(d => d.Amount);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
+        .Sum(d => d.Amount);
 
         double employerContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionEmployer)
-            .Sum(d => d.Amount);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionEmployer)
+        .Sum(d => d.Amount);
 
         double totalContributions = personalContributions + employerContributions;
 
@@ -301,15 +326,17 @@ public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birt
             limit = ContributionLimits.Limit401kEmployer(personalContributions, employerContributions, date.Year - birthdate.Year);
         }
 
-        double amountToDeposit = amount + totalContributions > limit ? limit : amount;
+        // Only allow the remaining amount up to the limit for this year/category
+        double remaining = Math.Max(0, limit - (category == TransactionCategory.ContributionPersonal ? personalContributions : totalContributions));
+        double amountToDeposit = Math.Min(amount, remaining);
         double actualDeposit = base.Deposit(amountToDeposit, date, category);
-        
+
         // Track contribution basis (contributions are after-tax)
         if (category == TransactionCategory.ContributionPersonal || category == TransactionCategory.ContributionEmployer)
         {
             contributionBasis += actualDeposit;
         }
-        
+
         return actualDeposit;
     }
 
@@ -317,22 +344,22 @@ public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birt
     {
         var amountWithdrawn = Math.Min(amount, Balance(date));
         double age = date.Year - birthdate.Year + (date.Month - birthdate.Month) / 12.0;
-        
+
         // For Roth accounts, determine how much is contributions vs earnings
         double contributionAmount = Math.Min(amountWithdrawn, contributionBasis);
-        
+
         // Calculate early withdrawal penalty using the new calculator
         var penalty = EarlyWithdrawalPenaltyCalculator.CalculatePenalty(
-            Type, 
-            amountWithdrawn, 
-            age,
-            rothContributionAmount: contributionAmount,
-            withdrawalReason: WithdrawalReason.GeneralDistribution);
+        Type,
+        amountWithdrawn,
+        age,
+        rothContributionAmount: contributionAmount,
+        withdrawalReason: WithdrawalReason.GeneralDistribution);
 
         if (penalty > 0)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\t Roth 401(k) Early Withdrawal Penalty Applied: {penalty:C}");
+            Console.WriteLine($"💸 FEE: Roth401(k) Early Withdrawal Penalty {penalty:C} → IRS");
             Console.ResetColor();
 
             base.Withdraw(penalty, date, TransactionCategory.EarlyWithdrawalPenality);
@@ -348,13 +375,13 @@ public class Roth401kAccount(double annualGrowthRate, string name, DateOnly birt
     {
         int currentAge = date.Year - birthdate.Year;
         double priorYearBalance = Balance(new DateOnly(date.Year - 1, 12, 31));
-        
-        // Roth 401(k) requires RMDs unlike Roth IRA
+
+        // Roth401(k) requires RMDs unlike Roth IRA
         return RMDCalculator.CalculateRMD(this, currentAge, priorYearBalance, isStillWorking);
     }
 }
 
-public class TraditionalIRAAccount(double annualGrowthRate, string name, Person person, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.TraditionalIRA)
+public class TraditionalIRAAccount(double annualGrowthRate, string name, Person person, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.TraditionalIRA, creationDate)
 {
     public Person Owner { get; } = person;
     private readonly DateOnly birthdate = DateOnly.FromDateTime(person.BirthDate);
@@ -362,8 +389,8 @@ public class TraditionalIRAAccount(double annualGrowthRate, string name, Person 
     public override double Deposit(double amount, DateOnly date, TransactionCategory category)
     {
         double personalContributions = DepositHistory
-            .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
-            .Sum(d => d.Amount);
+        .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
+        .Sum(d => d.Amount);
 
         double limit = ContributionLimits.GetIRALimit(date.Year, Owner.CurrentAge(date));
         double amountToDeposit = Math.Min(amount, limit - personalContributions);
@@ -374,18 +401,18 @@ public class TraditionalIRAAccount(double annualGrowthRate, string name, Person 
     {
         var amountWithdrawn = Math.Min(amount, Balance(date));
         double age = date.Year - birthdate.Year + (date.Month - birthdate.Month) / 12.0;
-        
+
         // Calculate early withdrawal penalty using the new calculator
         var penalty = EarlyWithdrawalPenaltyCalculator.CalculatePenalty(
-            Type, 
-            amountWithdrawn, 
-            age,
-            withdrawalReason: WithdrawalReason.GeneralDistribution);
+        Type,
+        amountWithdrawn,
+        age,
+        withdrawalReason: WithdrawalReason.GeneralDistribution);
 
         if (penalty > 0)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\t Traditional IRA Early Withdrawal Penalty Applied: {penalty:C}");
+            Console.WriteLine($"💸 FEE: Traditional IRA Early Withdrawal Penalty {penalty:C} → IRS");
             Console.ResetColor();
 
             base.Withdraw(penalty, date, TransactionCategory.EarlyWithdrawalPenality);
@@ -398,12 +425,12 @@ public class TraditionalIRAAccount(double annualGrowthRate, string name, Person 
     {
         int currentAge = date.Year - birthdate.Year;
         double priorYearBalance = Balance(new DateOnly(date.Year - 1, 12, 31));
-        
+
         return RMDCalculator.CalculateRMD(this, currentAge, priorYearBalance, false);
     }
 }
 
-public class TaxableAccount(double annualGrowthRate, string name, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Taxable)
+public class TaxableAccount(double annualGrowthRate, string name, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.Taxable, creationDate)
 {
     public override double Withdraw(double amount, DateOnly date, TransactionCategory category)
     {
@@ -423,44 +450,45 @@ public class TaxableAccount(double annualGrowthRate, string name, double startin
     }
 }
 
-public class HSAAccount(double annualGrowthRate, string name, double startingBalance = 0) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.HSA)
+public class HSAAccount(double annualGrowthRate, string name, double startingBalance = 0, DateOnly? creationDate = null) : InvestmentAccount(annualGrowthRate, name, startingBalance, AccountType.HSA, creationDate)
 {
+    // HSA annual personal contribution limit handling
     public override double Deposit(double amount, DateOnly date, TransactionCategory category)
     {
-        double personalContributions = DepositHistory
+        if (amount <= 0) return 0;
+        if (category != TransactionCategory.ContributionPersonal && category != TransactionCategory.Intrest)
+            return base.Deposit(amount, date, category); // Allow non-contribution deposits untouched
+
+        double personalContributionsYtd = DepositHistory
             .Where(d => d.Date.Year == date.Year && d.Category == TransactionCategory.ContributionPersonal)
             .Sum(d => d.Amount);
 
         double limit = ContributionLimits.GetHSALimit(date.Year);
-        double amountToDeposit = Math.Min(amount, limit - personalContributions);
-        return base.Deposit(amountToDeposit, date, category);
+        double remaining = Math.Max(0, limit - personalContributionsYtd);
+        double toDeposit = Math.Min(amount, remaining);
+        return base.Deposit(toDeposit, date, category);
     }
 
     public override double Withdraw(double amount, DateOnly date, TransactionCategory category)
     {
-        // HSA withdrawals for qualified medical expenses are tax and penalty free
-        // Non-qualified withdrawals before age 65 incur 20% penalty
+        // Qualified medical expense withdrawals are tax/penalty free
+        bool isQualifiedMedical = category == TransactionCategory.MedicalExpense;
         double currentBalance = Balance(date);
         if (currentBalance <= 0) return 0;
-
         double amountWithdrawn = Math.Min(currentBalance, amount);
-        
-        // For simplicity, assume medical expenses unless otherwise categorized
-        bool isQualifiedMedical = category == TransactionCategory.MedicalExpense;
-        
+
         if (!isQualifiedMedical)
         {
-            // Apply 20% penalty for non-qualified withdrawals (simplified logic)
-            double penalty = amountWithdrawn * 0.20;
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\t HSA Non-Qualified Withdrawal Penalty Applied: {penalty:C}");
-            Console.ResetColor();
-            
-            base.Withdraw(penalty, date, TransactionCategory.EarlyWithdrawalPenality);
+            // Apply penalty (simplified: 20%) before age 65 for non-qualified withdrawals
+            int age = date.Year - DateOnly.FromDateTime(DateTime.Now).Year + (date.Month / 12); // Simplified, ideally use owner birthdate
+            if (age < 65)
+            {
+                double penalty = amountWithdrawn * 0.20;
+                base.Withdraw(penalty, date, TransactionCategory.EarlyWithdrawalPenality);
+            }
         }
 
-        WithdrawalHistory.Add((amountWithdrawn, date, category));
-        return amountWithdrawn;
+        return base.Withdraw(amountWithdrawn, date, category);
     }
 }
 
