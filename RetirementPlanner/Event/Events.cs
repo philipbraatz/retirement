@@ -60,7 +60,42 @@ public static class LifeEvents
             if (remaining <=0) break;
 
             // For emergency fund accounts, respect the minimum
-            if (type == AccountType.Savings || type == AccountType.Taxable)
+            if (type == AccountType.Savings)
+            {
+                // 1) Use Pocket Cash freely
+                var pocket = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings && a.Name == "Pocket Cash" && a.Balance(date) > 0);
+                if (pocket != null)
+                {
+                    double toWithdraw = Math.Min(remaining, pocket.Balance(date));
+                    if (toWithdraw > 0)
+                    {
+                        double withdrawn = pocket.Withdraw(toWithdraw, date, TransactionCategory.Expenses);
+                        remaining -= withdrawn;
+                    }
+                }
+
+                if (remaining <= 0) continue;
+
+                // 2) Then tap other Savings with emergency fund protection
+                double available = person.GetAvailableForWithdrawal(date, AccountType.Savings);
+                if (available >0)
+                {
+                    foreach (var acct in person.Investments.Accounts.Where(a => a.Type == AccountType.Savings && a.Name != "Pocket Cash" && a.Balance(date) >0))
+                    {
+                        if (remaining <=0) break;
+                        double toWithdraw = Math.Min(remaining, Math.Min(available, acct.Balance(date)));
+                        if (toWithdraw >0)
+                        {
+                            double withdrawn = acct.Withdraw(toWithdraw, date, TransactionCategory.Expenses);
+                            remaining -= withdrawn;
+                            available -= withdrawn;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if (type == AccountType.Taxable)
             {
                 double available = person.GetAvailableForWithdrawal(date, type);
                 if (available >0)

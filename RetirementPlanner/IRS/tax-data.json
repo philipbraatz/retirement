@@ -1,0 +1,51 @@
+{
+  "years": [
+    {
+      "year": 2024,
+      "standardDeduction": {
+        "Single": 14600,
+        "MarriedFilingJointly": 29200,
+        "MarriedFilingSeparately": 14600,
+        "HeadOfHousehold": 21900
+      },
+      "brackets": {
+        "Single": [
+          { "lowerBound": 0, "upperBound": 11600, "rate": 0.10 },
+          { "lowerBound": 11600, "upperBound": 47150, "rate": 0.12 },
+          { "lowerBound": 47150, "upperBound": 100525, "rate": 0.22 },
+          { "lowerBound": 100525, "upperBound": 191950, "rate": 0.24 },
+          { "lowerBound": 191950, "upperBound": 243725, "rate": 0.32 },
+          { "lowerBound": 243725, "upperBound": 609350, "rate": 0.35 },
+          { "lowerBound": 609350, "upperBound": 1.7976931348623157E+308, "rate": 0.37 }
+        ],
+        "MarriedFilingJointly": [
+          { "lowerBound": 0, "upperBound": 23200, "rate": 0.10 },
+          { "lowerBound": 23200, "upperBound": 94300, "rate": 0.12 },
+          { "lowerBound": 94300, "upperBound": 201050, "rate": 0.22 },
+          { "lowerBound": 201050, "upperBound": 383900, "rate": 0.24 },
+          { "lowerBound": 383900, "upperBound": 487450, "rate": 0.32 },
+          { "lowerBound": 487450, "upperBound": 731200, "rate": 0.35 },
+          { "lowerBound": 731200, "upperBound": 1.7976931348623157E+308, "rate": 0.37 }
+        ],
+        "MarriedFilingSeparately": [
+          { "lowerBound": 0, "upperBound": 11600, "rate": 0.10 },
+          { "lowerBound": 11600, "upperBound": 47150, "rate": 0.12 },
+          { "lowerBound": 47150, "upperBound": 100525, "rate": 0.22 },
+          { "lowerBound": 100525, "upperBound": 191950, "rate": 0.24 },
+          { "lowerBound": 191950, "upperBound": 243725, "rate": 0.32 },
+          { "lowerBound": 243725, "upperBound": 365600, "rate": 0.35 },
+          { "lowerBound": 365600, "upperBound": 1.7976931348623157E+308, "rate": 0.37 }
+        ],
+        "HeadOfHousehold": [
+          { "lowerBound": 0, "upperBound": 16550, "rate": 0.10 },
+          { "lowerBound": 16550, "upperBound": 63100, "rate": 0.12 },
+          { "lowerBound": 63100, "upperBound": 100500, "rate": 0.22 },
+          { "lowerBound": 100500, "upperBound": 191950, "rate": 0.24 },
+          { "lowerBound": 191950, "upperBound": 243700, "rate": 0.32 },
+          { "lowerBound": 243700, "upperBound": 609350, "rate": 0.35 },
+          { "lowerBound": 609350, "upperBound": 1.7976931348623157E+308, "rate": 0.37 }
+        ]
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ namespace RetirementPlanner.IRS;
 
 /// <summary>
 /// Calculates Required Minimum Distributions (RMDs) based on IRS regulations
-/// RMDs are required starting at age 73 for most retirement accounts
+/// RMDs are required starting at age determined by SECURE/SECURE 2.0 rules
 /// </summary>
 public static class RMDCalculator
 {
@@ -36,8 +36,8 @@ public static class RMDCalculator
     /// <returns>Required minimum distribution amount</returns>
     public static double CalculateRMD(InvestmentAccount account, int age, double priorYearEndBalance, bool isStillWorking = false)
     {
-        // RMDs start at age 73
-        if (age < 73) return 0;
+        int rmdStartAge = GetRMDStartAge(account);
+        if (age < rmdStartAge) return 0;
 
         // Still working exception for 401(k) plans (not IRAs)
         if (isStillWorking && (account.Type == AccountType.Traditional401k || account.Type == AccountType.Traditional403b))
@@ -57,6 +57,42 @@ public static class RMDCalculator
         if (lifeExpectancyFactor <= 0) return priorYearEndBalance; // Edge case for very old ages
 
         return priorYearEndBalance / lifeExpectancyFactor;
+    }
+
+    /// <summary>
+    /// Determines RMD starting age based on SECURE/SECURE 2.0 and account owner birth year
+    /// </summary>
+    private static int GetRMDStartAge(InvestmentAccount account)
+    {
+        // Try to infer owner birth year where available via account types that hold owner/birthdate
+        int birthYear = DateTime.Now.Year - 90; // conservative default
+        switch (account)
+        {
+            case Traditional401kAccount t401k:
+                birthYear = t401k.GetType().GetField("birthdate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance) is { } ?
+                    ((DateOnly)t401k.GetType().GetField("birthdate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(t401k)).Year : birthYear;
+                break;
+            case Roth401kAccount r401k:
+                birthYear = r401k.GetType().GetField("birthdate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance) is { } ?
+                    ((DateOnly)r401k.GetType().GetField("birthdate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(r401k)).Year : birthYear;
+                break;
+            case TraditionalIRAAccount ira:
+                // Person is owner, get BirthDate
+                birthYear = ira.Owner.BirthDate.Year;
+                break;
+        }
+
+        return GetRMDStartAge(birthYear);
+    }
+
+    /// <summary>
+    /// Public: get RMD starting age based on birth year.
+    /// </summary>
+    public static int GetRMDStartAge(int birthYear)
+    {
+        if (birthYear < 1951) return 72; // legacy cohorts
+        if (birthYear <= 1959) return 73; // SECURE 2.0 effective 2023
+        return 75; // 1960+ effective 2033
     }
 
     /// <summary>
@@ -92,8 +128,8 @@ public static class RMDCalculator
             AccountType.TraditionalIRA => true,
             AccountType.SEPIRA => true,
             AccountType.SIMPLEIRA => true,
-            AccountType.Roth401k => true,  // Roth 401(k) requires RMDs unlike Roth IRA
-            AccountType.Roth403b => true,  // Roth 403(b) requires RMDs unlike Roth IRA
+            AccountType.Roth401k => false,  // SECURE 2.0: Roth 401(k) RMDs eliminated starting 2024
+            AccountType.Roth403b => false,  // SECURE 2.0: Roth 403(b) RMDs eliminated starting 2024
             AccountType.RothIRA => false,  // No RMDs during owner's lifetime
             AccountType.Savings => false,
             AccountType.Taxable => false,
@@ -102,14 +138,12 @@ public static class RMDCalculator
     }
 
     /// <summary>
-    /// Calculates the penalty for not taking required RMD
+    /// Calculates the penalty for not taking required RMD.
+    /// Returns both standard (25%) and corrected (10%) penalty amounts.
     /// </summary>
-    /// <param name="requiredAmount">Required RMD amount</param>
-    /// <param name="actualWithdrawal">Amount actually withdrawn</param>
-    /// <returns>Penalty amount (25% of shortfall as of 2023)</returns>
-    public static double CalculateRMDPenalty(double requiredAmount, double actualWithdrawal)
+    public static (double StandardPenalty, double CorrectedPenalty) CalculateRMDPenalty(double requiredAmount, double actualWithdrawal)
     {
         double shortfall = Math.Max(0, requiredAmount - actualWithdrawal);
-        return shortfall * 0.25; // 25% penalty as of 2023 (reduced from 50%)
+        return (shortfall * 0.25, shortfall * 0.10);
     }
 }

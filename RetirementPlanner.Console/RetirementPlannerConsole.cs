@@ -102,8 +102,8 @@ public class RetirementPlannerConsole
                 Type = JobType.FullTime,
                 Salary = 120000,
                 PaymentType = PaymentType.Salaried,
-                RetirementContributionPercent = 15, // 15% contribution
-                CompanyMatchContributionPercent = 5, // 5% company match
+                RetirementContributionPercent = 0.15, // 15% (fraction)
+                CompanyMatchContributionPercent = 0.05, // 5% (fraction)
                 HoursWorkedWeekly = 40,
                 PayFrequency = PayFrequency.Monthly,
                 StartDate = DateOnly.FromDateTime(DateTime.Now)
@@ -226,83 +226,91 @@ public class RetirementPlannerConsole
     private static void ProcessJobPayEvent(Person person, JobPayEventArgs e)
     {
         int age = person.CurrentAge(e.Date);
-        
-        // Calculate optimal retirement contribution allocation using the sophisticated logic
-        var (traditionalAmount, rothAmount) = e.Job.CalculateOptimalRetirementAllocation(person, e.Date);
-        double monthlyContribution = traditionalAmount + rothAmount;
-        double companyMatch = e.GrossIncome * ((e.Job.CompanyMatchContributionPercent ?? 0) / 100);
-        
-        // Find both Traditional and Roth 401k accounts
+
+        // Allocation returns ANNUAL amounts – convert to MONTHLY for a single payday
+        var (traditionalAnnual, rothAnnual) = e.Job.CalculateOptimalRetirementAllocation(person, e.Date);
+        double traditionalMonthly = traditionalAnnual / 12.0;
+        double rothMonthly = rothAnnual / 12.0;
+        double monthlyContribution = traditionalMonthly + rothMonthly;
+
+        // Company match percent is already a fraction (0.05) – do NOT divide by 100 again
+        double companyMatchMonthly = e.GrossIncome * (e.Job.CompanyMatchContributionPercent ?? 0);
+
         var traditional401k = person.Investments.Accounts.FirstOrDefault(a => a is Traditional401kAccount);
         var roth401k = person.Investments.Accounts.FirstOrDefault(a => a is Roth401kAccount);
-        
-        // Allocate contributions based on optimal strategy
-        if (traditionalAmount > 0 && traditional401k != null)
+
+        if (traditionalMonthly > 0 && traditional401k != null)
         {
-            double actualTraditionalDeposit = traditional401k.Deposit(traditionalAmount, e.Date, TransactionCategory.ContributionPersonal);
-            double actualMatchDeposit = traditional401k.Deposit(companyMatch, e.Date, TransactionCategory.ContributionEmployer);
-            
-            if (actualTraditionalDeposit > 0)
+            double personalDeposit = traditional401k.Deposit(traditionalMonthly, e.Date, TransactionCategory.ContributionPersonal);
+            double matchDeposit = traditional401k.Deposit(companyMatchMonthly, e.Date, TransactionCategory.ContributionEmployer);
+            if (personalDeposit > 0 || matchDeposit > 0)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"  💰 Traditional 401k: {actualTraditionalDeposit:C} personal + {actualMatchDeposit:C} match");
+                Console.WriteLine($"  💰 Traditional 401k: {personalDeposit:C} personal + {matchDeposit:C} match");
                 Console.ResetColor();
             }
         }
-        
-        if (rothAmount > 0 && roth401k != null)
+
+        if (rothMonthly > 0 && roth401k != null)
         {
-            double actualRothDeposit = roth401k.Deposit(rothAmount, e.Date, TransactionCategory.ContributionPersonal);
-            
-            if (actualRothDeposit > 0)
+            double rothDeposit = roth401k.Deposit(rothMonthly, e.Date, TransactionCategory.ContributionPersonal);
+            if (rothDeposit > 0)
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"  🌟 Roth 401k: {actualRothDeposit:C} (tax-free growth!)");
+                Console.WriteLine($"  🌟 Roth 401k: {rothDeposit:C} (tax-free growth!)");
                 Console.ResetColor();
             }
         }
-        
-        // Show allocation strategy reasoning
+
         if (monthlyContribution > 0)
         {
-            double traditionalPercent = traditionalAmount / monthlyContribution * 100;
-            double rothPercent = rothAmount / monthlyContribution * 100;
-            
+            double tradPct = traditionalMonthly / monthlyContribution * 100;
+            double rothPct = rothMonthly / monthlyContribution * 100;
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"  📊 Allocation Strategy: {traditionalPercent:F0}% Traditional, {rothPercent:F0}% Roth (Age: {age})");
+            Console.WriteLine($"  📊 Allocation Strategy: {tradPct:F0}% Traditional, {rothPct:F0}% Roth (Age: {age})");
             Console.ResetColor();
         }
-        
-        // Calculate net income after contributions and taxes
-        var savingsAccount = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings);
-        if (savingsAccount != null)
+
+        // Rough net income after contributions and estimated tax
+        double netIncome = e.GrossIncome - monthlyContribution - (e.GrossIncome * 0.25);
+        if (netIncome <= 0) return; // Nothing left to route
+
+        // 1) Refill Pocket Cash first
+        var pocketCash = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings && a.Name == "Pocket Cash");
+        if (pocketCash != null && netIncome > 0)
         {
-            // Simplified net income calculation
-            double netIncome = e.GrossIncome - monthlyContribution - (e.GrossIncome * 0.25); // Rough tax estimate
-            
-            if (netIncome > 0)
+            double pocketShortfall = person.PocketCashShortfall(e.Date);
+            if (pocketShortfall > 0)
             {
-                // Check emergency fund status and prioritize replenishment
-                double emergencyFundShortfall = person.GetEmergencyFundShortfall(e.Date);
-                
-                if (emergencyFundShortfall > 0)
-                {
-                    // Emergency fund is low - prioritize replenishment
-                    double emergencyFundBoost = Math.Min(netIncome, emergencyFundShortfall);
-                    savingsAccount.Deposit(emergencyFundBoost, e.Date, TransactionCategory.Income);
-                    netIncome -= emergencyFundBoost;
-                    
-                    Console.ForegroundColor = ConsoleColor.Blue;
-                    Console.WriteLine($"💧 Emergency Fund Boost: ${emergencyFundBoost:C} → Savings");
-                    Console.ResetColor();
-                }
-                
-                // Deposit remaining net income
-                if (netIncome > 0)
-                {
-                    savingsAccount.Deposit(netIncome, e.Date, TransactionCategory.Income);
-                }
+                double toPocket = Math.Min(netIncome, pocketShortfall);
+                pocketCash.Deposit(toPocket, e.Date, TransactionCategory.Income);
+                netIncome -= toPocket;
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine($"  🟡 Pocket Cash Refill: {toPocket:C} (Target {person.PocketCashTarget(e.Date):C})");
+                Console.ResetColor();
             }
+        }
+
+        // 2) Emergency fund top-up (Savings excluding Pocket Cash)
+        var coreSavings = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings && a.Name != "Pocket Cash");
+        if (coreSavings != null && netIncome > 0)
+        {
+            double efShortfall = person.GetEmergencyFundShortfall(e.Date);
+            if (efShortfall > 0)
+            {
+                double efBoost = Math.Min(netIncome, efShortfall);
+                coreSavings.Deposit(efBoost, e.Date, TransactionCategory.Income);
+                netIncome -= efBoost;
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine($"  💧 Emergency Fund Boost: {efBoost:C} → Savings");
+                Console.ResetColor();
+            }
+        }
+
+        // 3) Remaining net income → core savings (or pocket cash if no core savings)
+        if (netIncome > 0)
+        {
+            (coreSavings ?? pocketCash)?.Deposit(netIncome, e.Date, TransactionCategory.Income);
         }
     }
     

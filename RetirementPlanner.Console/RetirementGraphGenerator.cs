@@ -17,6 +17,7 @@ public class RetirementGraphGenerator
         public double Roth401k { get; set; }
         public double RothIRA { get; set; }
         public double Savings { get; set; }
+        public double PocketCash { get; set; } // New: pocket cash tracked separately
         public double TotalAssets { get; set; }
         public double MonthlyIncome { get; set; }
         public double MonthlyExpenses { get; set; }
@@ -41,6 +42,7 @@ public class RetirementGraphGenerator
         double roth401k = 0;
         double rothIRA = 0;
         double savings = 0;
+        double pocketCash = 0;
 
         foreach (var account in accounts.Values)
         {
@@ -53,8 +55,10 @@ public class RetirementGraphGenerator
                 rothIRA = balance;
             else if (account.Name == "Savings")
                 savings = balance;
+            else if (account.Name == "Pocket Cash")
+                pocketCash = balance;
         }
-        var totalAssets = traditional401k + roth401k + rothIRA + savings;
+        var totalAssets = traditional401k + roth401k + rothIRA + savings + pocketCash;
         var age = CalculateAge(date);
         var preciseAge = CalculatePreciseAge(date);
 
@@ -76,6 +80,7 @@ public class RetirementGraphGenerator
             Roth401k = roth401k,
             RothIRA = rothIRA,
             Savings = savings,
+            PocketCash = pocketCash,
             TotalAssets = totalAssets,
             MonthlyIncome = monthlyIncome,
             MonthlyExpenses = monthlyExpenses,
@@ -134,6 +139,7 @@ public class RetirementGraphGenerator
         var roth401k = _dataPoints.Select(dp => dp.Roth401k / DOLLAR_SCALE).ToArray();
         var rothIRA = _dataPoints.Select(dp => dp.RothIRA / DOLLAR_SCALE).ToArray();
         var savings = _dataPoints.Select(dp => dp.Savings / DOLLAR_SCALE).ToArray();
+        var pocketCashVals = _dataPoints.Select(dp => dp.PocketCash).ToArray(); // unscaled for right axis
         var totalAssets = _dataPoints.Select(dp => dp.TotalAssets / DOLLAR_SCALE).ToArray();
 
         // Add account balance lines with smooth curves
@@ -160,6 +166,18 @@ public class RetirementGraphGenerator
         savingsPlot.Color = ScottPlot.Color.FromHex("#d62728"); // Red
         savingsPlot.LineWidth = 2;
         savingsPlot.MarkerSize = 0;
+
+        // Pocket Cash on right Y axis (own scale)
+        var pocketPlot = plt.Add.Scatter(ages, pocketCashVals);
+        pocketPlot.LegendText = "Pocket Cash";
+        pocketPlot.Color = ScottPlot.Color.FromHex("#b8860b"); // DarkGoldenRod
+        pocketPlot.LineWidth = 2;
+        pocketPlot.MarkerSize = 0;
+
+        var rightAxis = plt.Axes.AddRightAxis();
+        rightAxis.Label.Text = "Pocket Cash ($)";
+        rightAxis.Color(pocketPlot.Color);
+        pocketPlot.Axes.YAxis = rightAxis;
 
         var totalPlot = plt.Add.Scatter(ages, totalAssets);
         totalPlot.LegendText = "Total Assets";

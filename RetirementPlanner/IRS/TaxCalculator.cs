@@ -18,23 +18,48 @@ public class TaxCalculator(Person person, int taxYear)
 
     public double GetTaxableIncome(double grossIncome)
     {
-        //double deductions = GetTotalDeductions();
-        return Math.Max(0, grossIncome);
+        double deductions = GetTotalDeductions();
+        return Math.Max(0, grossIncome - deductions);
     }
 
     public double GetTotalDeductions()
     {
-        double standardDeduction = GetStandardDeduction();
+        int age = EstimateAgeAtYearEnd(TaxYear);
+        bool isBlind = false; // Future: add Person flag
+        double standardDeduction = GetStandardDeduction(TaxYear, age, isBlind);
         return standardDeduction;
     }
 
     public double GetTaxesOwed(double grossIncome)
     {
         double taxableIncome = GetTaxableIncome(grossIncome);
-        return CalculateTaxes(Person.FileType, taxableIncome);
+        return CalculateTaxes(Person.FileType, taxableIncome, TaxYear);
     }
 
-    public double GetStandardDeduction() => (int)Person.FileType;
+    public double GetStandardDeduction(int year, int age, bool isBlind = false)
+    {
+        return GetStandardDeduction(year, age, isBlind, Person.FileType);
+    }
+
+    public static double GetStandardDeduction(int year, int age, bool isBlind, FileType filingStatus)
+    {
+        double baseDeduction = TaxYearDataProvider.GetBaseStandardDeductionStatic(year, filingStatus) ?? 0;
+        double additional = 0;
+
+        // Additional standard deduction per IRC § 63(f)
+        if (age >= 65)
+        {
+            double add = (filingStatus == FileType.Single || filingStatus == FileType.HeadOfHousehold) ? 1950 : 1550;
+            additional += add;
+        }
+        if (isBlind)
+        {
+            double add = (filingStatus == FileType.Single || filingStatus == FileType.HeadOfHousehold) ? 1950 : 1550;
+            additional += add;
+        }
+
+        return baseDeduction + additional;
+    }
 
     private double GetTaxableInvestmentIncome() => Person.Investments.Accounts.Where(acc => acc is Traditional401kAccount)
             .Aggregate(0.0, (tax, account) => tax + account.WithdrawalHistory
@@ -52,6 +77,7 @@ public class TaxCalculator(Person person, int taxYear)
             FileType.Single => CalculateTaxableSocialSecuritySingle(provisionalIncome, Person.SocialSecurityIncome),
             FileType.MarriedFilingJointly => CalculateTaxableSocialSecurityMFJ(provisionalIncome, Person.SocialSecurityIncome),
             FileType.MarriedFilingSeparately => CalculateTaxableSocialSecurityMFS(provisionalIncome, Person.SocialSecurityIncome),
+            FileType.HeadOfHousehold => CalculateTaxableSocialSecuritySingle(provisionalIncome, Person.SocialSecurityIncome),
             _ => 0
         };
     }
@@ -83,5 +109,12 @@ public class TaxCalculator(Person person, int taxYear)
         // Married filing separately has $0 thresholds - most SS income is taxable
         if (provisionalIncome <= 0) return 0;
         return Math.Min(socialSecurityIncome * 0.85, provisionalIncome * 0.85);
+    }
+
+    private int EstimateAgeAtYearEnd(int year)
+    {
+        if (Person.BirthDate == default) return 0;
+        var yearEnd = new DateOnly(year, 12, 31);
+        return Person.CurrentAge(yearEnd);
     }
 }

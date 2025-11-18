@@ -8,14 +8,17 @@ public static class TaxBrackets
         public double UpperBound { get; set; }
         public double Rate { get; set; }
     }
+
+    // Filing statuses (no embedded numeric values)
     public enum FileType
     {
-        Single = 13850,
-        MarriedFilingJointly = 27700,
-        MarriedFilingSeparately = 13851, // Different value to avoid conflict
-        HeadOfHousehold = 20800
+        Single,
+        MarriedFilingJointly,
+        MarriedFilingSeparately,
+        HeadOfHousehold
     }
 
+    // Default (2024) brackets retained as fallback
     public static Dictionary<FileType, Bracket[]> Brackets = new()
     {
         {
@@ -67,17 +70,28 @@ public static class TaxBrackets
             ]
         }
     };
-    public static double CalculateTaxes(FileType fileType, double income) => Brackets[fileType]
+
+    // Year-aware calculation using JSON-backed provider; falls back to default
+    public static double CalculateTaxes(FileType fileType, double income, int taxYear)
+    {
+        var brackets = IRS.TaxYearDataProvider.GetBracketsForYearStatic(taxYear, fileType) ?? Brackets[fileType];
+        return brackets
             .Where(bracket => income > bracket.LowerBound)
             .Sum(bracket => (Math.Min(income, bracket.UpperBound) - bracket.LowerBound) * bracket.Rate);
+    }
+
+    // Backward-compatible overload (assumes current year)
+    public static double CalculateTaxes(FileType fileType, double income) => CalculateTaxes(fileType, income, DateTime.Now.Year);
 
     public static double GetOptimalRothConversionAmount(Person person, DateOnly date)
     {
         double taxableIncome = person.IncomeYearly + person.Investments.Accounts.FirstOrDefault(f => f is RothIRAAccount)
             .DepositHistory.Where(d => d.Date.Year == date.Year).Sum(d => d.Amount);
 
+        var brackets = IRS.TaxYearDataProvider.GetBracketsForYearStatic(date.Year, person.FileType) ?? Brackets[person.FileType];
+
         // Find the highest bracket we can fill without exceeding
-        foreach (var bracket in Brackets[person.FileType])
+        foreach (var bracket in brackets)
         {
             if (taxableIncome < bracket.UpperBound)
             {
@@ -91,10 +105,10 @@ public static class TaxBrackets
     /// <summary>
     /// Get the marginal tax rate for a given income and filing type
     /// </summary>
-    public static double GetMarginalTaxRate(FileType fileType, double income)
+    public static double GetMarginalTaxRate(FileType fileType, double income, int taxYear)
     {
-        var brackets = Brackets[fileType];
-        
+        var brackets = IRS.TaxYearDataProvider.GetBracketsForYearStatic(taxYear, fileType) ?? Brackets[fileType];
+
         foreach (var bracket in brackets)
         {
             if (income >= bracket.LowerBound && income < bracket.UpperBound)
@@ -102,8 +116,12 @@ public static class TaxBrackets
                 return bracket.Rate;
             }
         }
-        
+
         // If income exceeds all brackets, return the highest bracket rate
         return brackets.Last().Rate;
     }
+
+    // Backward-compatible marginal rate method (assumes current year)
+    public static double GetMarginalTaxRate(FileType fileType, double income)
+        => GetMarginalTaxRate(fileType, income, DateTime.Now.Year);
 }
