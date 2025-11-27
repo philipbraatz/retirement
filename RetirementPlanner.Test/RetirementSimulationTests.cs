@@ -1,4 +1,5 @@
 ﻿using RetirementPlanner;
+using RetirementPlanner.Calculators;
 using RetirementPlanner.IRS;
 using RetirementPlanner.Test;
 using Planner = RetirementPlanner.RetirementPlanner;
@@ -67,7 +68,7 @@ public class RetirementSimulationTests
 
         // Act - Withdraw a small amount (should be from contributions)
         double withdrawalAmount = 1000;
-        double actualWithdrawn = rothIRA.Withdraw(withdrawalAmount, new DateOnly(2024, 1, 1), TransactionCategory.Expenses);
+        double actualWithdrawn = rothIRA.Spend(withdrawalAmount, new DateOnly(2024, 1, 1), TransactionCategory.Expenses);
 
         // Assert
         double finalBalance = rothIRA.Balance(new DateOnly(2024, 1, 1));
@@ -85,7 +86,7 @@ public class RetirementSimulationTests
 
         // Act
         double withdrawalAmount = 5000;
-        double actualWithdrawn = taxableAccount.Withdraw(withdrawalAmount, new DateOnly(2024, 1, 1), TransactionCategory.Expenses);
+        double actualWithdrawn = taxableAccount.Spend(withdrawalAmount, new DateOnly(2024, 1, 1), TransactionCategory.Expenses);
 
         // Assert
         double finalBalance = taxableAccount.Balance(new DateOnly(2024, 1, 1));

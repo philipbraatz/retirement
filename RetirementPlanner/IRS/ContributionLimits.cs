@@ -1,180 +1,157 @@
 ﻿namespace RetirementPlanner.IRS;
 
-/// <summary>
-/// IRS contribution limits for retirement accounts (2024/2025 tax years)
-/// Based on IRS Publication 560 and annual updates
-/// </summary>
 public static class ContributionLimits
 {
-    // 2024 Limits
-    public const double Max401k2024Personal = 23000;
-    public const double Max401k2024CatchUp50 = 7500;
-    public const double Max401k2024CatchUp60to63 = 11250; // SECURE 2.0 enhanced catch-up
-    public const double Max401k2024Total = 69000;
-    public const double Max401k2024TotalWithCatchUp = 76500;
-    public const double MaxIRA2024 = 7000;
-    public const double MaxIRA2024CatchUp = 1000;
-    
-    // 2025 Limits (projected)
-    public const double Max401k2025Personal = 23500;
-    public const double Max401k2025CatchUp50 = 7500;
-    public const double Max401k2025CatchUp60to63 = 11250;
-    public const double Max401k2025Total = 70000;
-    public const double Max401k2025TotalWithCatchUp = 77500;
-    public const double MaxIRA2025 = 7000;
-    public const double MaxIRA2025CatchUp = 1000;
-    
-    // HSA limits
-    public const double MaxHSA2024Individual = 4150;
-    public const double MaxHSA2024Family = 8300;
-    public const double MaxHSA2024CatchUp = 1000;
-    public const double MaxHSA2025Individual = 4300; // Projected
-    public const double MaxHSA2025Family = 8550; // Projected
-    public const double MaxHSA2025CatchUp = 1000;
+    private static TaxYearConfig LoadYear(int year)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "IRS", "tax-data.json");
+        using var stream = File.OpenRead(path);
+        var data = System.Text.Json.JsonSerializer.Deserialize<TaxData>(stream, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new TaxData();
+        return data.Years.FirstOrDefault(y => y.Year == year) ?? new TaxYearConfig { Year = year };
+    }
 
-    // Compensation limits
-    public const double CompensationLimit2024 = 345000;
-    public const double CompensationLimit2025 = 350000; // Projected
-    
-    // SEP-IRA limits (25% of compensation or dollar limit)
-    public const double MaxSEP2024 = 69000;
-    public const double MaxSEP2025 = 70000;
-    
-    // SIMPLE IRA limits
-    public const double MaxSIMPLE2024 = 16000;
-    public const double MaxSIMPLE2024CatchUp = 3500;
-    public const double MaxSIMPLE2025 = 16500; // Projected
-    public const double MaxSIMPLE2025CatchUp = 3500;
+    private static double GetLimit(int year, string key, double fallback)
+    {
+        var cfg = LoadYear(year);
+        return cfg.ContributionLimits != null && cfg.ContributionLimits.TryGetValue(key, out var v) ? v : fallback;
+    }
 
-    /// <summary>
-    /// Get 401(k) personal contribution limit for a given year and age
-    /// </summary>
     public static double Get401kPersonalLimit(int year, int age)
     {
-        double baseLimit = year >= 2025 ? Max401k2025Personal : Max401k2024Personal;
-        double catchUpLimit = 0;
-
-        if (age >= 50 && age < 60)
-        {
-            catchUpLimit = year >= 2025 ? Max401k2025CatchUp50 : Max401k2024CatchUp50;
-        }
-        else if (age >= 60 && age <= 63) // SECURE 2.0 enhanced catch-up
-        {
-            catchUpLimit = year >= 2025 ? Max401k2025CatchUp60to63 : Max401k2024CatchUp60to63;
-        }
-        else if (age >= 64) // Regular catch-up after enhanced period
-        {
-            catchUpLimit = year >= 2025 ? Max401k2025CatchUp50 : Max401k2024CatchUp50;
-        }
-
-        return baseLimit + catchUpLimit;
+        double baseLimit = GetLimit(year, "401kPersonal", 23000);
+        double catchUp50 = GetLimit(year, "401kCatchUp50", 7500);
+        double catchUp6063 = GetLimit(year, "401kCatchUp60to63", 11250);
+        double catchUp = 0;
+        if (age >= 50 && age < 60) catchUp = catchUp50;
+        else if (age >= 60 && age <= 63) catchUp = catchUp6063;
+        else if (age >= 64) catchUp = catchUp50;
+        return baseLimit + catchUp;
     }
 
-    /// <summary>
-    /// Get total 401(k) contribution limit (employee + employer) for a given year and age
-    /// </summary>
     public static double Get401kTotalLimit(int year, int age)
     {
-        if (age >= 50)
-        {
-            return year >= 2025 ? Max401k2025TotalWithCatchUp : Max401k2024TotalWithCatchUp;
-        }
-        return year >= 2025 ? Max401k2025Total : Max401k2024Total;
+        double total = GetLimit(year, "401kTotal", 69000);
+        double totalCatchUp = GetLimit(year, "401kTotalWithCatchUp", 76500);
+        return age >= 50 ? totalCatchUp : total;
     }
 
-    /// <summary>
-    /// Get IRA contribution limit for a given year and age
-    /// </summary>
     public static double GetIRALimit(int year, int age)
     {
-        double baseLimit = year >= 2025 ? MaxIRA2025 : MaxIRA2024;
-        double catchUpLimit = 0;
-
-        if (age >= 50)
-        {
-            catchUpLimit = year >= 2025 ? MaxIRA2025CatchUp : MaxIRA2024CatchUp;
-        }
-
-        return baseLimit + catchUpLimit;
+        double baseLimit = GetLimit(year, "iraBase", 7000);
+        double catchUp = age >= 50 ? GetLimit(year, "iraCatchUp", 1000) : 0;
+        return baseLimit + catchUp;
     }
 
-    /// <summary>
-    /// Get SEP-IRA contribution limit for a given year (25% of compensation or dollar limit)
-    /// </summary>
+    public static double GetRothIRALimit(int year, int age, double modifiedAGI, TaxBrackets.FileType filingStatus)
+    {
+        var cfg = LoadYear(year);
+        double baseLimit = GetIRALimit(year, age);
+        var map = cfg.RothIraPhaseOut;
+        double start = filingStatus switch
+        {
+            TaxBrackets.FileType.Single => map?.GetValueOrDefault("Single_Start") ?? 146000,
+            TaxBrackets.FileType.HeadOfHousehold => map?.GetValueOrDefault("HeadOfHousehold_Start") ?? 146000,
+            TaxBrackets.FileType.MarriedFilingJointly => map?.GetValueOrDefault("MarriedFilingJointly_Start") ?? 230000,
+            TaxBrackets.FileType.MarriedFilingSeparately => map?.GetValueOrDefault("MarriedFilingSeparately_Start") ?? 0,
+            _ => 146000
+        };
+        double end = filingStatus switch
+        {
+            TaxBrackets.FileType.Single => map?.GetValueOrDefault("Single_End") ?? 161000,
+            TaxBrackets.FileType.HeadOfHousehold => map?.GetValueOrDefault("HeadOfHousehold_End") ?? 161000,
+            TaxBrackets.FileType.MarriedFilingJointly => map?.GetValueOrDefault("MarriedFilingJointly_End") ?? 240000,
+            TaxBrackets.FileType.MarriedFilingSeparately => map?.GetValueOrDefault("MarriedFilingSeparately_End") ?? 10000,
+            _ => 161000
+        };
+        if (modifiedAGI <= start) return baseLimit;
+        if (modifiedAGI >= end) return 0;
+        double pct = (modifiedAGI - start) / (end - start);
+        return Math.Max(0, baseLimit * (1 - pct));
+    }
+
+    public static double GetTraditionalIRADeductibleLimit(int year, int age, double modifiedAGI, TaxBrackets.FileType filingStatus, bool taxpayerCoveredByPlan, bool spouseCoveredByPlan)
+    {
+        var cfg = LoadYear(year);
+        double baseLimit = GetIRALimit(year, age);
+        var covered = cfg.TraditionalIraDeductPhaseOutCovered;
+        var spousal = cfg.TraditionalIraDeductPhaseOutSpousal;
+        double start; double end;
+        if (filingStatus == TaxBrackets.FileType.MarriedFilingSeparately)
+        {
+            start = covered?.GetValueOrDefault("MarriedFilingSeparately_Start") ?? 0;
+            end = covered?.GetValueOrDefault("MarriedFilingSeparately_End") ?? 10000;
+        }
+        else if (filingStatus == TaxBrackets.FileType.MarriedFilingJointly)
+        {
+            if (taxpayerCoveredByPlan)
+            {
+                start = covered?.GetValueOrDefault("MarriedFilingJointly_Start") ?? 123000;
+                end = covered?.GetValueOrDefault("MarriedFilingJointly_End") ?? 143000;
+            }
+            else if (!taxpayerCoveredByPlan && spouseCoveredByPlan)
+            {
+                start = spousal?.GetValueOrDefault("MarriedFilingJointly_Start") ?? 230000;
+                end = spousal?.GetValueOrDefault("MarriedFilingJointly_End") ?? 240000;
+            }
+            else
+            {
+                return baseLimit;
+            }
+        }
+        else // Single / HOH
+        {
+            if (taxpayerCoveredByPlan)
+            {
+                start = covered?.GetValueOrDefault("Single_Start") ?? 77000;
+                end = covered?.GetValueOrDefault("Single_End") ?? 87000;
+            }
+            else return baseLimit;
+        }
+        if (modifiedAGI <= start) return baseLimit;
+        if (modifiedAGI >= end) return 0;
+        double pct = (modifiedAGI - start) / (end - start);
+        return Math.Max(0, baseLimit * (1 - pct));
+    }
+
     public static double GetSEPLimit(int year, double compensation)
     {
-        double dollarLimit = year >= 2025 ? MaxSEP2025 : MaxSEP2024;
+        double dollarLimit = GetLimit(year, "sepLimit", year >= 2025 ? 70000 : 69000);
         double percentageLimit = compensation * 0.25;
         return Math.Min(dollarLimit, percentageLimit);
     }
 
-    /// <summary>
-    /// Get SIMPLE IRA contribution limit for a given year and age
-    /// </summary>
     public static double GetSIMPLELimit(int year, int age)
     {
-        double baseLimit = year >= 2025 ? MaxSIMPLE2025 : MaxSIMPLE2024;
-        double catchUpLimit = 0;
-
-        if (age >= 50)
-        {
-            catchUpLimit = year >= 2025 ? MaxSIMPLE2025CatchUp : MaxSIMPLE2024CatchUp;
-        }
-
-        return baseLimit + catchUpLimit;
+        double baseLimit = GetLimit(year, "simpleBase", year >= 2025 ? 16500 : 16000);
+        double catchUp = age >= 50 ? GetLimit(year, "simpleCatchUp", 3500) : 0;
+        return baseLimit + catchUp;
     }
 
-    /// <summary>
-    /// Get compensation limit for a given year
-    /// </summary>
-    public static double GetCompensationLimit(int year)
-    {
-        return year >= 2025 ? CompensationLimit2025 : CompensationLimit2024;
-    }
+    public static double GetCompensationLimit(int year) => GetLimit(year, "compensationLimit", year >= 2025 ? 350000 : 345000);
 
-    /// <summary>
-    /// Get HSA contribution limit for a given year and coverage type
-    /// </summary>
     public static double GetHSALimit(int year, bool isFamilyCoverage = false, int age = 0)
     {
-        double baseLimit = year >= 2025 
-            ? (isFamilyCoverage ? MaxHSA2025Family : MaxHSA2025Individual)
-            : (isFamilyCoverage ? MaxHSA2024Family : MaxHSA2024Individual);
-        
-        double catchUpLimit = 0;
-        if (age >= 55)
-        {
-            catchUpLimit = year >= 2025 ? MaxHSA2025CatchUp : MaxHSA2024CatchUp;
-        }
-
-        return baseLimit + catchUpLimit;
+        string baseKey = isFamilyCoverage ? "hsaFamily" : "hsaIndividual";
+        double baseLimit = GetLimit(year, baseKey, isFamilyCoverage ? (year >= 2025 ? 8550 : 8300) : (year >= 2025 ? 4300 : 4150));
+        double catchUp = age >= 55 ? GetLimit(year, "hsaCatchUp", 1000) : 0;
+        return baseLimit + catchUp;
     }
 
-    /// <summary>
-    /// Get HSA contribution limit for a given year (individual coverage)
-    /// </summary>
-    public static double GetHSALimit(int year)
-    {
-        return GetHSALimit(year, false, 0);
-    }
+    public static double GetHSALimit(int year) => GetHSALimit(year, false, 0);
 
-    /// <summary>
-    /// Calculate maximum employer 401(k) contribution
-    /// </summary>
     public static double CalculateMaxEmployer401k(int year, int age, double employeeContribution, double compensation)
     {
         double totalLimit = Get401kTotalLimit(year, age);
         double limitedCompensation = Math.Min(compensation, GetCompensationLimit(year));
-        double maxEmployerFromComp = limitedCompensation * 0.25; // Typical limit
-        
+        double maxEmployerFromComp = limitedCompensation * 0.25;
         return Math.Min(totalLimit - employeeContribution, maxEmployerFromComp);
     }
 
     public static double Limit401kPersonal(double personalContributions, double personalRate, double age)
     {
         int currentYear = DateTime.Now.Year;
-        double baseLimit = Math.Max(personalContributions * personalRate, Get401kPersonalLimit(currentYear, (int)age));
-        return baseLimit;
+        // Return full allowable limit for the year (personalRate parameter reserved for future salary-based calc)
+        return Get401kPersonalLimit(currentYear, (int)age);
     }
 
     public static double Limit401kEmployer(double currentPersonal, double employerContribution, int age)
@@ -189,10 +166,11 @@ public static class ContributionLimits
     public static double Calculate401kContributionYearly(double salary, double personalRate, double employerRate, double age)
     {
         int currentYear = DateTime.Now.Year;
-        double annualContribution = Get401kPersonalLimit(currentYear, (int)age);
+        double personalLimit = Get401kPersonalLimit(currentYear, (int)age);
         double salaryForMatch = LimitCompensation(salary);
-        double employerContribution = Math.Min(salaryForMatch * employerRate, Get401kTotalLimit(currentYear, (int)age) - annualContribution);
-
-        return Math.Min(annualContribution + employerContribution, Get401kTotalLimit(currentYear, (int)age));
+        double potentialPersonal = Math.Min(salary * personalRate, personalLimit);
+        double remainingSpace = Math.Max(0, Get401kTotalLimit(currentYear, (int)age) - potentialPersonal);
+        double employerContribution = Math.Min(salaryForMatch * employerRate, remainingSpace);
+        return potentialPersonal + employerContribution;
     }
 }

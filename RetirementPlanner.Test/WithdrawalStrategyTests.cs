@@ -80,20 +80,17 @@ namespace RetirementPlanner.Test
         [Fact]
         public void Withdrawal_Should_Use_Roth_When_Traditional_Accounts_Depleted()
         {
-            // This test demonstrates that Roth accounts WILL be used when other accounts are depleted
-            // Create a person with mostly Roth accounts and very low Traditional balances
             Person tempPerson = new()
             {
                 BirthDate = new DateTime(1950, 1, 1), // Age 74 at test date
             };
 
-            // Create accounts with Traditional accounts having low balances
             var savingsAccount = new InvestmentAccount(0.05, "Savings", 1000, AccountType.Savings);
             var traditional401k = new Traditional401kAccount(0.05, "Traditional 401k", DateOnly.FromDateTime(new DateTime(1950, 1, 1)), 500); // Low balance
             var traditionalIRA = new TraditionalIRAAccount(0.05, "Traditional IRA", tempPerson, 300); // Low balance
             var roth401k = new Roth401kAccount(0.05, "Roth 401k", DateOnly.FromDateTime(new DateTime(1950, 1, 1)), 50000); // High balance
             var rothIRA = new RothIRAAccount(0.05, "Roth IRA", tempPerson, 25000); // High balance
-            var hsaAccount = new HSAAccount(0.05, "HSA", 10000);
+            var hsaAccount = new HSAAccount(0.05, "HSA", tempPerson, 10000);
 
             var person = new Person();
             person.BirthDate = new DateTime(1950, 1, 1); // Age 74 at test date
@@ -104,36 +101,17 @@ namespace RetirementPlanner.Test
             var testDate = new DateOnly(2024, 6, 1);
             double totalWithdrawal = 2000; // Amount that will require depleting Traditional and using Roth
 
-            // Act - Manually withdraw from accounts in order that would be used for age 74
-            // Order for age 74: Savings, Traditional401k, TraditionalIRA, Roth401k, HSA, RothIRA
             double remaining = totalWithdrawal;
+            remaining -= savingsAccount.Spend(remaining, testDate, TransactionCategory.Expenses);
+            if (remaining > 0) remaining -= traditional401k.Spend(remaining, testDate, TransactionCategory.Expenses);
+            if (remaining > 0) remaining -= traditionalIRA.Spend(remaining, testDate, TransactionCategory.Expenses);
+            if (remaining > 0) remaining -= roth401k.Spend(remaining, testDate, TransactionCategory.Expenses);
 
-            // Withdraw from Savings first
-            remaining -= savingsAccount.Withdraw(remaining, testDate, TransactionCategory.Expenses);
-            
-            // Then Traditional 401k
-            if (remaining > 0)
-                remaining -= traditional401k.Withdraw(remaining, testDate, TransactionCategory.Expenses);
-            
-            // Then Traditional IRA
-            if (remaining > 0)
-                remaining -= traditionalIRA.Withdraw(remaining, testDate, TransactionCategory.Expenses);
-            
-            // Then Roth 401k (this should be needed since Traditional accounts are low)
-            if (remaining > 0)
-                remaining -= roth401k.Withdraw(remaining, testDate, TransactionCategory.Expenses);
-
-            // Assert - Verify behavior
             var traditionalBalance = traditional401k.Balance(testDate) + traditionalIRA.Balance(testDate);
             var rothBalanceAfter = roth401k.Balance(testDate);
 
-            // Traditional accounts should be depleted
             Assert.True(traditionalBalance < 100, $"Traditional accounts should be mostly depleted but have {traditionalBalance:C}");
-            
-            // Roth 401k should have been used (less than original 50000)
             Assert.True(rothBalanceAfter < 50000, $"Roth 401k should have been used but balance is still {rothBalanceAfter:C}");
-            
-            // Verify spending was fully covered
             Assert.True(remaining <= 0, $"Spending should be fully covered, but {remaining:C} remains");
         }
 

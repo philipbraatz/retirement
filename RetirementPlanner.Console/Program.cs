@@ -1,6 +1,6 @@
 ﻿using RetirementPlanner;
+using RetirementPlanner.Calculators;
 using RetirementPlanner.Event;
-using RetirementPlanner.IRS;
 using RetirementPlanner.Test;
 
 namespace RetirementPlanner.ConsoleApp;
@@ -11,11 +11,32 @@ class Program
     {
         Console.WriteLine("Retirement Planner Console");
         Console.WriteLine("==========================\n");
-        
+        PrintStartupDisclaimer();
         await ShowMainMenu();
-        
+        PrintExitDisclaimer();
         Console.WriteLine("\nPress any key to exit...");
         Console.ReadKey();
+    }
+
+    private static void PrintStartupDisclaimer()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("DISCLAIMER: Educational simulation only. Not tax, legal, or investment advice.");
+        Console.WriteLine("Federal tax modeling simplified; state/local taxes omitted.");
+        Console.WriteLine("See TAX_COMPLIANCE_REVIEW.md and LEGAL_DISCLAIMER.md for details.\n");
+        Console.ResetColor();
+    }
+
+    private static void PrintExitDisclaimer()
+    {
+        Console.ForegroundColor = ConsoleColor.DarkYellow;
+        Console.WriteLine("\n====================================================");
+        Console.WriteLine("Simulation complete.");
+        Console.WriteLine("This software provides estimates only; accuracy not guaranteed.");
+        Console.WriteLine("Consult qualified professionals before acting on results.");
+        Console.WriteLine("Docs: TAX_COMPLIANCE_REVIEW.md | LEGAL_DISCLAIMER.md");
+        Console.WriteLine("====================================================");
+        Console.ResetColor();
     }
     
     private static async Task ShowMainMenu()
@@ -65,6 +86,18 @@ class Program
         
         if (person != null)
         {
+            // Ensure global cash account exists and is registered
+            var existingCash = person.Investments.Accounts.FirstOrDefault(a => a.Name == "Cash");
+            if (existingCash is null)
+            {
+                var cash = new InvestmentAccount.CashAccount();
+                person.Investments.Accounts.Add(cash);
+                InvestmentAccount.SetGlobalCashAccount((InvestmentAccount.CashAccount)cash);
+            }
+            else if (existingCash is InvestmentAccount.CashAccount cashAcct)
+            {
+                InvestmentAccount.SetGlobalCashAccount(cashAcct);
+            }
             await ShowPersonMenu(person);
         }
     }
@@ -219,19 +252,22 @@ class Program
             
             // Calculate optimal retirement contribution allocation using the sophisticated logic
             var (traditionalAmount, rothAmount) = e.Job.CalculateOptimalRetirementAllocation(person, e.Date);
-            double monthlyContribution = traditionalAmount + rothAmount;
             double companyMatch = e.GrossIncome * ((e.Job.CompanyMatchContributionPercent ?? 0) / 100);
             
+            // Deposit gross income to global cash first (realistic inflow)
+            var globalCash = person.Investments.Accounts.FirstOrDefault(a => a.Name == "Cash") as InvestmentAccount.CashAccount;
+            if (globalCash != null && e.GrossIncome > 0)
+            {
+                globalCash.Deposit(e.GrossIncome, e.Date, TransactionCategory.Income);
+            }
             // Find both Traditional and Roth 401k accounts
             var traditional401k = person.Investments.Accounts.FirstOrDefault(a => a is Traditional401kAccount);
             var roth401k = person.Investments.Accounts.FirstOrDefault(a => a is Roth401kAccount);
-            
-            // Allocate contributions based on optimal strategy
-            if (traditionalAmount > 0 && traditional401k != null)
+            // Allocate contributions from cash via transfer
+            if (traditionalAmount > 0 && traditional401k != null && globalCash != null)
             {
-                double actualTraditionalDeposit = traditional401k.Deposit(traditionalAmount, e.Date, TransactionCategory.ContributionPersonal);
-                double actualMatchDeposit = traditional401k.Deposit(companyMatch, e.Date, TransactionCategory.ContributionEmployer);
-                
+                double actualTraditionalDeposit = globalCash.TransferTo(traditional401k, traditionalAmount, e.Date, TransactionCategory.ContributionPersonal);
+                double actualMatchDeposit = globalCash.TransferTo(traditional401k, companyMatch, e.Date, TransactionCategory.ContributionEmployer);
                 if (actualTraditionalDeposit > 0)
                 {
                     Console.ForegroundColor = ConsoleColor.Green;
@@ -239,11 +275,9 @@ class Program
                     Console.ResetColor();
                 }
             }
-            
-            if (rothAmount > 0 && roth401k != null)
+            if (rothAmount > 0 && roth401k != null && globalCash != null)
             {
-                double actualRothDeposit = roth401k.Deposit(rothAmount, e.Date, TransactionCategory.ContributionPersonal);
-                
+                double actualRothDeposit = globalCash.TransferTo(roth401k, rothAmount, e.Date, TransactionCategory.ContributionPersonal);
                 if (actualRothDeposit > 0)
                 {
                     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -251,45 +285,35 @@ class Program
                     Console.ResetColor();
                 }
             }
-            
-            // Show allocation strategy reasoning
-            if (monthlyContribution > 0)
+            // Recompute net income remaining in cash after contributions & rough tax
+            double netIncome = e.GrossIncome - (traditionalAmount + rothAmount) - (e.GrossIncome * 0.25);
+            if (globalCash != null && netIncome > 0)
             {
-                double traditionalPercent = traditionalAmount / monthlyContribution * 100;
-                double rothPercent = rothAmount / monthlyContribution * 100;
-                
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"  📊 Allocation Strategy: {traditionalPercent:F0}% Traditional, {rothPercent:F0}% Roth (Age: {age})");
-                Console.ResetColor();
+                globalCash.Deposit(netIncome, e.Date, TransactionCategory.Income);
             }
-            
-            // Calculate net income after contributions and taxes
-            double netIncome = e.GrossIncome - monthlyContribution - (e.GrossIncome * 0.25); // Rough tax estimate
-            
-            // Pocket cash allocation (use a savings account named "Pocket Cash")
+            // Pocket cash allocation now moves from Cash to Pocket Cash account
             var pocketCashAcct = person.Investments.Accounts.FirstOrDefault(a => a.Name == "Pocket Cash");
-            if (pocketCashAcct != null && netIncome > 0)
+            if (pocketCashAcct != null && netIncome > 0 && globalCash != null)
             {
                 double pocketShortfall = person.PocketCashShortfall(e.Date);
                 if (pocketShortfall > 0)
                 {
                     double toPocket = Math.Min(netIncome, pocketShortfall);
-                    pocketCashAcct.Deposit(toPocket, e.Date, TransactionCategory.Income);
+                    globalCash.TransferTo(pocketCashAcct, toPocket, e.Date, TransactionCategory.InternalTransfer);
                     netIncome -= toPocket;
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
                     Console.WriteLine($"  🟡 Pocket Cash Refill: {toPocket:C} (Target {person.PocketCashTarget(e.Date):C})");
                     Console.ResetColor();
                 }
             }
-            
-            var savingsAccount = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings);
-            if (savingsAccount != null && netIncome > 0)
+            var savingsAccount = person.Investments.Accounts.FirstOrDefault(a => a.Type == AccountType.Savings && a.Name != "Cash" && a.Name != "Pocket Cash");
+            if (savingsAccount != null && netIncome > 0 && globalCash != null)
             {
                 double emergencyFundShortfall = person.GetEmergencyFundShortfall(e.Date);
                 if (emergencyFundShortfall > 0)
                 {
                     double emergencyFundBoost = Math.Min(netIncome, emergencyFundShortfall);
-                    savingsAccount.Deposit(emergencyFundBoost, e.Date, TransactionCategory.Income);
+                    globalCash.TransferTo(savingsAccount, emergencyFundBoost, e.Date, TransactionCategory.InternalTransfer);
                     netIncome -= emergencyFundBoost;
                     Console.ForegroundColor = ConsoleColor.Blue;
                     Console.WriteLine($"  💧 Emergency Fund Boost: {emergencyFundBoost:C} → Savings");
@@ -297,7 +321,7 @@ class Program
                 }
                 if (netIncome > 0)
                 {
-                    savingsAccount.Deposit(netIncome, e.Date, TransactionCategory.Income);
+                    globalCash.TransferTo(savingsAccount, netIncome, e.Date, TransactionCategory.InternalTransfer);
                 }
             }
         };

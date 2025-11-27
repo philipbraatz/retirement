@@ -22,7 +22,7 @@ namespace RetirementPlanner.Test
             var traditionalIRA = new TraditionalIRAAccount(0.07, "Traditional IRA", person, 8000);
             var rothIRA = new RothIRAAccount(0.07, "Roth IRA", person, 6000);
             var taxable = new TaxableAccount(0.06, "Taxable", 15000);
-            var hsa = new HSAAccount(0.08, "HSA", 3000);
+            var hsa = new HSAAccount(0.08, "HSA", person, 3000);
 
             // Verify balances
             var currentDate = DateOnly.FromDateTime(DateTime.Now);
@@ -71,14 +71,15 @@ namespace RetirementPlanner.Test
         public void HSA_ContributionLimits_ShouldBeRespected()
         {
             // Arrange
-            var hsa = new HSAAccount(0.07, "HSA", 0);
+            var person = new Person { BirthDate = new DateTime(1985, 1, 1) };
+            var hsa = new HSAAccount(0.07, "HSA", person, 0);
             var currentDate = DateOnly.FromDateTime(DateTime.Now);
 
             // Act
             double depositResult = hsa.Deposit(5000, currentDate, TransactionCategory.ContributionPersonal);
 
             // Assert - should be limited to HSA contribution limit
-            Assert.True(depositResult <= ContributionLimits.GetHSALimit(currentDate.Year));
+            Assert.True(depositResult <= ContributionLimits.GetHSALimit(currentDate.Year, false, person.CurrentAge(currentDate)));
         }
     }
 }

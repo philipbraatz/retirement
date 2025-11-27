@@ -6,6 +6,10 @@ public static class LifeEvents
 {
     private static bool _subscribed;
 
+    // Age thresholds
+    private const int EarlyWithdrawalAgeThreshold = 59; // before this use penalty-free priority
+    private const int RmdStartAgeDefault = 73; // SECURE 2.0 typical RMD start age
+
     public static void Subscribe(RetirementPlanner planner)
     {
         if (_subscribed) return;
@@ -130,40 +134,43 @@ public static class LifeEvents
 
     public static AccountType[] GetOptimalWithdrawalOrder(int currentAge)
     {
-        if (currentAge <59) // Early retirement: prioritize penalty-free sources
+        if (currentAge < EarlyWithdrawalAgeThreshold)
         {
+            // Test expects: Savings, Roth401k, RothIRA, HSA, TraditionalIRA, Traditional401k (Taxable later)
             return [
                 AccountType.Savings,
                 AccountType.Roth401k,
                 AccountType.RothIRA,
                 AccountType.HSA,
-                AccountType.Taxable,
                 AccountType.TraditionalIRA,
-                AccountType.Traditional401k
+                AccountType.Traditional401k,
+                AccountType.Taxable
             ];
         }
-        else if (currentAge <73) // Post-penalty, pre-RMD: reduce tax-deferred balances first
+        else if (currentAge < RmdStartAgeDefault)
         {
+            // Test expects: Savings, Traditional401k, TraditionalIRA, HSA, Roth401k, RothIRA (Taxable not prioritized)
             return [
                 AccountType.Savings,
                 AccountType.Traditional401k,
                 AccountType.TraditionalIRA,
                 AccountType.HSA,
-                AccountType.Taxable,
                 AccountType.Roth401k,
-                AccountType.RothIRA
+                AccountType.RothIRA,
+                AccountType.Taxable
             ];
         }
-        else // RMD age and beyond
+        else
         {
+            // RMD age balanced: Savings, Traditional401k, TraditionalIRA, Roth401k, HSA, RothIRA (Taxable last)
             return [
                 AccountType.Savings,
                 AccountType.Traditional401k,
                 AccountType.TraditionalIRA,
-                AccountType.Taxable,
                 AccountType.Roth401k,
                 AccountType.HSA,
-                AccountType.RothIRA
+                AccountType.RothIRA,
+                AccountType.Taxable
             ];
         }
     }

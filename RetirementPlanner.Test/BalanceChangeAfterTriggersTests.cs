@@ -9,11 +9,11 @@ namespace RetirementPlanner.Test
         public void Prove_Balance_Change_Is_Nonzero_After_Growth_Trigger()
         {
             // Arrange - Create accounts with starting balances
+            var owner = new Person { BirthDate = new DateTime(1990, 1, 1) };
             var traditional401k = new Traditional401kAccount(0.05, "Traditional 401k", new DateOnly(1990, 1, 1), 50000);
-            var rothIRA = new RothIRAAccount(0.05, "Roth IRA", 
-                new Person { BirthDate = new DateTime(1990, 1, 1) }, 10000);
+            var rothIRA = new RothIRAAccount(0.05, "Roth IRA", owner, 10000);
             var taxableAccount = new TaxableAccount(0.05, "Taxable", 20000);
-            var hsaAccount = new HSAAccount(0.05, "HSA", 5000);
+            var hsaAccount = new HSAAccount(0.05, "HSA", owner, 5000);
             
             var testDate = new DateOnly(2025, 6, 15);
             

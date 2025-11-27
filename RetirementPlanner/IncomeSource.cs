@@ -101,10 +101,8 @@ public class IncomeSource
         // Calculate current taxable income for remaining allocation
         double currentTaxableIncome = person.Jobs.Sum(j => j.CalculateTaxableIncome());
         
-        // Get current marginal tax rate
-        double marginalRate = TaxBrackets.GetMarginalTaxRate(person.FileType, currentTaxableIncome);
-
-        // Enhanced allocation logic considering early retirement strategy
+        // Year-aware marginal tax rate (avoid legacy overload)
+        double marginalRate = TaxBrackets.GetMarginalTaxRate(person.FileType, currentTaxableIncome, date.Year);
         var currentAge = person.CurrentAge(date);
         var yearsToFullRetirement = person.FullRetirementAge - currentAge;
         

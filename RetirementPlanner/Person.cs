@@ -6,6 +6,9 @@ namespace RetirementPlanner;
 public class Person(params InvestmentAccount[] accounts)
 {
  public DateTime BirthDate { get; set; }
+ public DateTime? SpouseBirthDate { get; set; } // Optional spouse birth date for joint-life RMD if >10 years younger
+ public bool IsBlind { get; set; } // Standard deduction qualifier
+ public bool SpouseIsBlind { get; set; } // Spouse qualifier for MFJ
  public int CurrentAge(DateOnly date) => date.Year - BirthDate.Year;
  public bool GenderMale { get; set; }
  public int FullRetirementAge { get; set; }
@@ -27,6 +30,9 @@ public class Person(params InvestmentAccount[] accounts)
  public int SocialSecurityClaimingAge { get; set; }
  public double SocialSecurityIncome { get; set; }
  public double TaxableIncome { get; set; }
+ public double ModifiedAGI { get; set; }
+ // Optional tax-exempt interest added to provisional income (IRC §86(c)(2))
+ public double TaxExemptInterest { get; set; } = 0;
 
  #region Emergency Fund Properties
  
@@ -134,7 +140,6 @@ public class Person(params InvestmentAccount[] accounts)
  int age = CurrentAge(date);
  return age <59.5;
  }
- 
  public bool ShouldAvoidEarlyWithdrawalPenalties(DateOnly date)
  {
  bool wouldIncurPenalty = WouldIncurEarlyWithdrawalPenalty(date);
@@ -142,7 +147,6 @@ public class Person(params InvestmentAccount[] accounts)
  bool hasEmergencyFundBuffer = GetCurrentEmergencyFundBalance(date) > (EssentialExpenses + DiscretionarySpending) /12;
  return wouldIncurPenalty && hasStableIncome && hasEmergencyFundBuffer;
  }
- 
  public double GetAvailableWithdrawalExcludingPenalties(DateOnly date)
  {
  if (!ShouldAvoidEarlyWithdrawalPenalties(date))
@@ -150,26 +154,15 @@ public class Person(params InvestmentAccount[] accounts)
  return Investments.Accounts.Sum(a => a.Balance(date));
  }
  
- var penaltyFreeAccountTypes = new[] { 
- AccountType.Savings, 
- AccountType.Taxable, 
- AccountType.HSA 
- };
- 
+ var penaltyFreeAccountTypes = new[] { AccountType.Savings, AccountType.Taxable, AccountType.HSA };
  double penaltyFreeTotal =0;
  
  foreach (var accountType in penaltyFreeAccountTypes)
  {
  if (accountType == AccountType.Savings || accountType == AccountType.Taxable)
- {
  penaltyFreeTotal += GetAvailableForWithdrawal(date, accountType);
- }
  else
- {
- penaltyFreeTotal += Investments.Accounts
- .Where(a => a.Type == accountType)
- .Sum(a => a.Balance(date));
- }
+ penaltyFreeTotal += Investments.Accounts.Where(a => a.Type == accountType).Sum(a => a.Balance(date));
  }
  
  var rothAccounts = Investments.Accounts.Where(a => a.Type == AccountType.RothIRA || a.Type == AccountType.Roth401k);
@@ -181,7 +174,6 @@ public class Person(params InvestmentAccount[] accounts)
  
  return penaltyFreeTotal;
  }
- 
  #endregion
 
  public double PocketCashTarget(DateOnly date)
@@ -225,6 +217,7 @@ public class Person(params InvestmentAccount[] accounts)
  taxable.AnnualGrowthRate, 
  taxable.Name, 
  taxable.Balance(DateOnly.FromDateTime(DateTime.Now))),
+ HSAAccount hsa => new HSAAccount(hsa.AnnualGrowthRate, hsa.Name, this, hsa.Balance(DateOnly.FromDateTime(DateTime.Now))),
  _ => account
  }).ToArray();
 
@@ -254,13 +247,17 @@ public class Person(params InvestmentAccount[] accounts)
  SocialSecurityClaimingAge = SocialSecurityClaimingAge,
  SocialSecurityIncome = SocialSecurityIncome,
  TaxableIncome = TaxableIncome,
+ ModifiedAGI = ModifiedAGI,
+ TaxExemptInterest = TaxExemptInterest,
  PreRetirementEmergencyFundMinimum = PreRetirementEmergencyFundMinimum,
  EarlyRetirementEmergencyFundMinimum = EarlyRetirementEmergencyFundMinimum,
  PostRetirementEmergencyFundMinimum = PostRetirementEmergencyFundMinimum,
  AutoCalculateEmergencyFunds = AutoCalculateEmergencyFunds,
  PreRetirementEmergencyMonths = PreRetirementEmergencyMonths,
  EarlyRetirementEmergencyMonths = EarlyRetirementEmergencyMonths,
- PostRetirementEmergencyMonths = PostRetirementEmergencyMonths
+ PostRetirementEmergencyMonths = PostRetirementEmergencyMonths,
+ IsBlind = IsBlind,
+ SpouseIsBlind = SpouseIsBlind
  };
 
  return clonedPerson;

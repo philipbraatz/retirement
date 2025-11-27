@@ -45,6 +45,173 @@
           { "lowerBound": 243700, "upperBound": 609350, "rate": 0.35 },
           { "lowerBound": 609350, "upperBound": 1.7976931348623157E+308, "rate": 0.37 }
         ]
+      },
+      "amt": {
+        "exemption": {
+          "Single": 85700,
+          "HeadOfHousehold": 85700,
+          "MarriedFilingJointly": 133300,
+          "MarriedFilingSeparately": 66650
+        },
+        "phaseOutStart": {
+          "Single": 609350,
+          "HeadOfHousehold": 609350,
+          "MarriedFilingJointly": 1218700,
+          "MarriedFilingSeparately": 609350
+        },
+        "breakpoint28Rate": {
+          "Default": 232600,
+          "MarriedFilingSeparately": 116300
+        },
+        "rates": {
+          "primary": 0.26,
+          "secondary": 0.28
+        }
+      },
+      "niitThresholds": {
+        "Single": 200000,
+        "HeadOfHousehold": 200000,
+        "MarriedFilingJointly": 250000,
+        "MarriedFilingSeparately": 125000
+      },
+      "niitRate": 0.038,
+      "additionalMedicareThresholds": {
+        "Single": 200000,
+        "HeadOfHousehold": 200000,
+        "MarriedFilingJointly": 250000,
+        "MarriedFilingSeparately": 125000
+      },
+      "additionalMedicareRate": 0.009,
+      "additionalDeductionAmounts": {
+        "SingleOrHOH": 1950,
+        "MFJOrMFS": 1550,
+        "SeniorAge": 65
+      },
+      "socialSecurityThresholds": {
+        "SingleLower": 25000,
+        "SingleUpper": 34000,
+        "MFJLower": 32000,
+        "MFJUpper": 44000,
+        "MidPct": 0.50,
+        "HighPct": 0.85
+      },
+      "contributionLimits": {
+        "401kPersonal": 23000,
+        "401kCatchUp50": 7500,
+        "401kCatchUp60to63": 11250,
+        "401kTotal": 69000,
+        "401kTotalWithCatchUp": 76500,
+        "iraBase": 7000,
+        "iraCatchUp": 1000,
+        "hsaIndividual": 4150,
+        "hsaFamily": 8300,
+        "hsaCatchUp": 1000,
+        "compensationLimit": 345000,
+        "sepLimit": 69000,
+        "simpleBase": 16000,
+        "simpleCatchUp": 3500
+      },
+      "rothIraPhaseOut": {
+        "Single_Start": 146000,
+        "Single_End": 161000,
+        "HeadOfHousehold_Start": 146000,
+        "HeadOfHousehold_End": 161000,
+        "MarriedFilingJointly_Start": 230000,
+        "MarriedFilingJointly_End": 240000,
+        "MarriedFilingSeparately_Start": 0,
+        "MarriedFilingSeparately_End": 10000
+      },
+      "traditionalIraDeductPhaseOutCovered": {
+        "Single_Start": 77000,
+        "Single_End": 87000,
+        "HeadOfHousehold_Start": 77000,
+        "HeadOfHousehold_End": 87000,
+        "MarriedFilingJointly_Start": 123000,
+        "MarriedFilingJointly_End": 143000,
+        "MarriedFilingSeparately_Start": 0,
+        "MarriedFilingSeparately_End": 10000
+      },
+      "traditionalIraDeductPhaseOutSpousal": {
+        "MarriedFilingJointly_Start": 230000,
+        "MarriedFilingJointly_End": 240000
+      }
+    },
+    {
+      "year": 2025,
+      "standardDeduction": {
+        "Single": 14900,
+        "MarriedFilingJointly": 29800,
+        "MarriedFilingSeparately": 14900,
+        "HeadOfHousehold": 22300
+      },
+      "brackets": {},
+      "amt": {},
+      "niitThresholds": {
+        "Single": 200000,
+        "HeadOfHousehold": 200000,
+        "MarriedFilingJointly": 250000,
+        "MarriedFilingSeparately": 125000
+      },
+      "niitRate": 0.038,
+      "additionalMedicareThresholds": {
+        "Single": 200000,
+        "HeadOfHousehold": 200000,
+        "MarriedFilingJointly": 250000,
+        "MarriedFilingSeparately": 125000
+      },
+      "additionalMedicareRate": 0.009,
+      "additionalDeductionAmounts": {
+        "SingleOrHOH": 1950,
+        "MFJOrMFS": 1550,
+        "SeniorAge": 65
+      },
+      "socialSecurityThresholds": {
+        "SingleLower": 25000,
+        "SingleUpper": 34000,
+        "MFJLower": 32000,
+        "MFJUpper": 44000,
+        "MidPct": 0.50,
+        "HighPct": 0.85
+      },
+      "contributionLimits": {
+        "401kPersonal": 23500,
+        "401kCatchUp50": 7500,
+        "401kCatchUp60to63": 11250,
+        "401kTotal": 70000,
+        "401kTotalWithCatchUp": 77500,
+        "iraBase": 7000,
+        "iraCatchUp": 1000,
+        "hsaIndividual": 4300,
+        "hsaFamily": 8550,
+        "hsaCatchUp": 1000,
+        "compensationLimit": 350000,
+        "sepLimit": 70000,
+        "simpleBase": 16500,
+        "simpleCatchUp": 3500
+      },
+      "rothIraPhaseOut": {
+        "Single_Start": 148000,
+        "Single_End": 163000,
+        "HeadOfHousehold_Start": 148000,
+        "HeadOfHousehold_End": 163000,
+        "MarriedFilingJointly_Start": 232000,
+        "MarriedFilingJointly_End": 242000,
+        "MarriedFilingSeparately_Start": 0,
+        "MarriedFilingSeparately_End": 10000
+      },
+      "traditionalIraDeductPhaseOutCovered": {
+        "Single_Start": 79000,
+        "Single_End": 89000,
+        "HeadOfHousehold_Start": 79000,
+        "HeadOfHousehold_End": 89000,
+        "MarriedFilingJointly_Start": 125000,
+        "MarriedFilingJointly_End": 145000,
+        "MarriedFilingSeparately_Start": 0,
+        "MarriedFilingSeparately_End": 10000
+      },
+      "traditionalIraDeductPhaseOutSpousal": {
+        "MarriedFilingJointly_Start": 232000,
+        "MarriedFilingJointly_End": 242000
       }
     }
   ]
